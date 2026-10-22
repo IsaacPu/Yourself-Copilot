@@ -1,0 +1,71 @@
+{
+  "revision": "4c94ad5f4081168c0d45bdc368f230ecb757cd09",
+  "repository": "https://github.com/microsoft/fluentui-system-icons",
+  "library": "Microsoft Fluent UI System Icons",
+  "license_source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/LICENSE",
+  "license": "MIT",
+  "assets": [
+    {
+      "file": "svg/ic_fluent_checkbox_checked_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Checkbox%20Checked/SVG/ic_fluent_checkbox_checked_24_regular.svg",
+      "sha256": "617379E778B87BB754628B65EFCD61A55E4A0A70732E13BDD522B8CDC2011F4D",
+      "name": "tasks"
+    },
+    {
+      "file": "svg/ic_fluent_note_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Note/SVG/ic_fluent_note_24_regular.svg",
+      "sha256": "E69930B7240385CB0B896EB064F340084C6695F216A3D43F48AC93BBC3799F64",
+      "name": "note"
+    },
+    {
+      "file": "svg/ic_fluent_history_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/History/SVG/ic_fluent_history_24_regular.svg",
+      "sha256": "07D75BB67B1B81CF504B86952CF90FC7AF2DE44EE6B335595EE3806047FC45B4",
+      "name": "history"
+    },
+    {
+      "file": "svg/ic_fluent_settings_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Settings/SVG/ic_fluent_settings_24_regular.svg",
+      "sha256": "5AC05E6E11C9EC9F24703091C42CA1F5C91F4032CB0EEE35C892D1872A38871B",
+      "name": "settings"
+    },
+    {
+      "file": "svg/ic_fluent_image_multiple_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Image%20Multiple/SVG/ic_fluent_image_multiple_24_regular.svg",
+      "sha256": "3D98FE242EAB2DFC572C24F9265937BF6D3766CB2B106BE319D7FF72D3381CA9",
+      "name": "images"
+    },
+    {
+      "file": "svg/ic_fluent_add_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Add/SVG/ic_fluent_add_24_regular.svg",
+      "sha256": "167C7F2703870A06FF80DBBCC5D60FA37BFAE9D225F37ED3D585949239BC3431",
+      "name": "plus"
+    },
+    {
+      "file": "svg/ic_fluent_more_horizontal_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/More%20Horizontal/SVG/ic_fluent_more_horizontal_24_regular.svg",
+      "sha256": "AACB8EE10E503858F5465D18BEB79F16D1AD790EB2B802127EE572062129FC3A",
+      "name": "more"
+    },
+    {
+      "file": "svg/ic_fluent_arrow_expand_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Arrow%20Expand/SVG/ic_fluent_arrow_expand_24_regular.svg",
+      "sha256": "595B4E3F1CD579167CF82D9601727A66DECB49EFBD5AE9993D17E4DABA1BF06F",
+      "name": "expand"
+    },
+    {
+      "file": "svg/ic_fluent_calendar_ltr_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Calendar%20LTR/SVG/ic_fluent_calendar_ltr_24_regular.svg",
+      "sha256": "7BB2E8004C34326C241D2D796C355D257E99FA1A5209178FB3D032CC429A8221",
+      "name": "calendar"
+    },
+    {
+      "file": "svg/ic_fluent_dismiss_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Dismiss/SVG/ic_fluent_dismiss_24_regular.svg",
+      "sha256": "F23A501BE08E93AD334F1705BE0C9E8224A8E7457BD884FE59263DB1C6A4F3DC",
+      "name": "remove"
+    }
+  ],
+  "downloaded_utc": "2026-10-21T14:41:41.8545291Z",
+  "variant": "24 regular"
+}

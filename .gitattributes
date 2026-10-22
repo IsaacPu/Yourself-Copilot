@@ -1,0 +1,5 @@
+# Keep bundled asset bytes unchanged so upstream checksums remain meaningful.
+fonts/** -text whitespace=cr-at-eol
+icons/** -text whitespace=cr-at-eol
+# This upstream license contains trailing whitespace; distribute it verbatim.
+fonts/LXGWWenKai/OFL.txt -whitespace
