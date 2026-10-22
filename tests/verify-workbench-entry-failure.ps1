@@ -1,7 +1,7 @@
 ﻿param([string]$SourcePath = '')
 $ErrorActionPreference = 'Stop'
 $projectPath = Split-Path $PSScriptRoot -Parent
-if ([string]::IsNullOrWhiteSpace($SourcePath)) { $SourcePath = $projectPath }
+if ([string]::IsNullOrWhiteSpace($SourcePath)) { $SourcePath = Join-Path $projectPath 'src' }
 $SourcePath = (Resolve-Path -LiteralPath $SourcePath).Path
 $testPath = Join-Path $projectPath ('.qa\workbench-entry-failure-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0,6))
 New-Item -ItemType Directory -Path $testPath | Out-Null

@@ -1,19 +1,23 @@
-# Publish only this project's source and reviewed resources.
+# Only project source, resources and documentation belong in this repository.
 /*
 !/.gitignore
 !/.gitattributes
 !/README.md
-!/build.ps1
-!/DesktopNote.manifest
-!/*.cs
-!/*.xaml
-!/fonts/
-!/icons/
-!/qa/
+!/CHANGELOG.md
+!/LICENSE
+!/VERSION
+!/NOTICE
+!/THIRD-PARTY-NOTICES.md
+!/.github/
+!/src/
+!/assets/
+!/tests/
+!/scripts/
 !/docs/
 
-# Keep local content and test/build output out of every allowed directory.
+# Generated output and local application data are never source artifacts.
 **/.qa/
+**/dist/
 **/bin/
 **/obj/
 **/.vs/

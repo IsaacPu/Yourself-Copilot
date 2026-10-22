@@ -1,0 +1,22 @@
+Yourself Copilot
+每天看得见的任务与备忘
+
+开始：完整解压此文件夹，双击 Yourself Copilot.exe。
+环境：Windows 10 / 11，64 位，.NET Framework 4.8 或以上。
+两个 XAML 文件、fonts 和 icons 是运行资源，请和 EXE 放在一起。
+
+添加任务、写备忘或导入桌面图片；内容自动保存在本程序文件夹。
+关闭工作台会收起到托盘。双击托盘图标重新打开，托盘菜单可完整退出。
+登录自动运行和启动显示卡片可在设置中开启。
+
+更新前：从托盘退出并备份整个旧文件夹。
+将新程序与资源复制到旧位置，保留 workboard.json*、library.json*、
+settings.json*、images、history 和 recovery 数据文件。
+不要只把 EXE 移到新位置；更换程序路径后重新设置登录自动运行。
+
+数据仅保存在本机，未加密；当前没有云端同步或 AI / Codex 接入。
+版本见 VERSION.txt。字体、图标授权见 THIRD-PARTY-NOTICES.txt 及相应目录。
+
+使用与更新：https://github.com/IsaacPu/Yourself-Copilot/blob/main/docs/USAGE.md
+下载与更新：https://github.com/IsaacPu/Yourself-Copilot/releases
+问题反馈：https://github.com/IsaacPu/Yourself-Copilot/issues

@@ -1,4 +1,4 @@
-﻿param([string]$SourceDirectory = (Split-Path $PSScriptRoot -Parent))
+﻿param([string]$SourceDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'src'))
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $sourceDirectoryPath = (Resolve-Path -LiteralPath $SourceDirectory).Path

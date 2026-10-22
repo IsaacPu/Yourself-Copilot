@@ -1,0 +1,27 @@
+Yourself Copilot - Third-party resources
+
+Noto Sans SC Regular
+Source: https://github.com/notofonts/noto-cjk
+License: SIL Open Font License 1.1
+Full license and copyright: fonts/NotoSansSC/OFL.txt and COPYRIGHT.txt
+
+LXGW WenKai Regular
+Source: https://github.com/lxgw/LxgwWenKai
+License: SIL Open Font License 1.1
+Full license and copyright: fonts/LXGWWenKai/OFL.txt and COPYRIGHT.txt
+
+Microsoft Fluent UI System Icons
+Source: https://github.com/microsoft/fluentui-system-icons
+License: MIT
+Full license: icons/LICENSE
+
+Exact resource versions, sources and checksums are recorded in
+fonts/font-assets-manifest.json and icons/manifest.json.
+
+The application companion mark is separate from Fluent icons.
+Its provenance is documented in icons/brand/README.md.
+
+Resource paths above are relative to the portable application's folder.
+In the source repository they are under assets/.
+Project code currently has no selected open-source license; these notices
+describe the licenses of the bundled third-party resources.

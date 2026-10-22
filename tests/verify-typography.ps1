@@ -24,21 +24,21 @@ $registrationsBefore = Get-FontRegistrationSnapshot
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $wpf = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\WPF'
 $refs = @('/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll','/reference:System.Runtime.Serialization.dll','/reference:System.Xaml.dll',"/reference:$wpf\WindowsBase.dll","/reference:$wpf\PresentationCore.dll","/reference:$wpf\PresentationFramework.dll","/reference:$wpf\WindowsFormsIntegration.dll")
-$sources = @(Get-ChildItem -LiteralPath $projectPath -Filter '*.cs' -File | ForEach-Object { $_.FullName })
+$sources = @(Get-ChildItem -LiteralPath (Join-Path $projectPath 'src') -Filter '*.cs' -File | ForEach-Object { $_.FullName })
 $runnerPath = Join-Path $testPath 'TypographyVerification.exe'
-& $compiler /nologo /target:winexe /platform:x64 /codepage:65001 "/out:$runnerPath" /main:LocalDesktopNote.TypographyVerification "/win32manifest:$projectPath\DesktopNote.manifest" @refs @sources (Join-Path $PSScriptRoot 'TypographyVerification.cs')
+& $compiler /nologo /target:winexe /platform:x64 /codepage:65001 "/out:$runnerPath" /main:LocalDesktopNote.TypographyVerification "/win32manifest:$projectPath\src\DesktopNote.manifest" @refs @sources (Join-Path $PSScriptRoot 'TypographyVerification.cs')
 if ($LASTEXITCODE -ne 0) { throw '字体验证编译失败' }
 
 foreach ($mode in @('bundled','missing','corrupt','memo-missing')) {
     $modePath = Join-Path $testPath $mode
     New-Item -ItemType Directory -Path $modePath | Out-Null
     Copy-Item -LiteralPath $runnerPath -Destination $modePath
-    Copy-Item -LiteralPath (Join-Path $projectPath 'WorkboardView.xaml') -Destination $modePath
-    if ($mode -eq 'bundled') { Copy-Item -LiteralPath (Join-Path $projectPath 'fonts') -Destination $modePath -Recurse }
+    Copy-Item -LiteralPath (Join-Path $projectPath 'src\WorkboardView.xaml') -Destination $modePath
+    if ($mode -eq 'bundled') { Copy-Item -LiteralPath (Join-Path $projectPath 'assets\fonts') -Destination $modePath -Recurse }
     if ($mode -eq 'memo-missing') {
         $fontPath = Join-Path $modePath 'fonts'
         New-Item -ItemType Directory -Path $fontPath | Out-Null
-        Copy-Item -LiteralPath (Join-Path $projectPath 'fonts\NotoSansSC') -Destination $fontPath -Recurse
+        Copy-Item -LiteralPath (Join-Path $projectPath 'assets\fonts\NotoSansSC') -Destination $fontPath -Recurse
     }
     if ($mode -eq 'corrupt') {
         foreach ($font in @('NotoSansSC\NotoSansSC-Regular.otf','LXGWWenKai\LXGWWenKai-Regular.ttf')) {

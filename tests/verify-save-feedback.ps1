@@ -1,7 +1,7 @@
 ﻿param([string]$SourcePath = '')
 $ErrorActionPreference = 'Stop'
 $projectPath = Split-Path $PSScriptRoot -Parent
-if ([string]::IsNullOrWhiteSpace($SourcePath)) { $SourcePath = $projectPath }
+if ([string]::IsNullOrWhiteSpace($SourcePath)) { $SourcePath = Join-Path $projectPath 'src' }
 $sourceDirectoryPath = (Resolve-Path -LiteralPath $SourcePath).Path
 $testPath = Join-Path $projectPath ('.qa\save-feedback-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0,6))
 $snapshotPath = Join-Path $testPath 'source'

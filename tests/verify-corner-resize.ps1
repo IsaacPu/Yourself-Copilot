@@ -1,9 +1,8 @@
-﻿param([Parameter(Mandatory=$true)][string]$SourceDirectory, [switch]$GeometryOnly)
+﻿param([string]$SourceDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) 'src'), [switch]$GeometryOnly)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path $PSScriptRoot -Parent
 $sourceDirectoryPath = (Resolve-Path -LiteralPath $SourceDirectory).Path
-if ($sourceDirectoryPath.TrimEnd('\') -eq $projectRoot.TrimEnd('\')) { throw '请传入隔离 release 目录，禁止本专项编译尚未完成 UI 的项目根' }
-if (-not (Test-Path -LiteralPath (Join-Path $sourceDirectoryPath 'CornerResize.cs'))) { throw '指定 release 尚未提供 CornerResize.cs' }
+if (-not (Test-Path -LiteralPath (Join-Path $sourceDirectoryPath 'CornerResize.cs'))) { throw '指定源码目录缺少 CornerResize.cs' }
 $checkRoot = Join-Path $projectRoot ('.qa\corner-resize-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0,6))
 $snapshotRoot = Join-Path $checkRoot 'source'
 New-Item -ItemType Directory -Path $snapshotRoot -Force | Out-Null
