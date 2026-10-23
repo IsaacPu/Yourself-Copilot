@@ -85,6 +85,7 @@ namespace LocalDesktopNote
                 byte[] first = File.ReadAllBytes(store.PathName);
                 store.Save();
                 Check(changes == 2 && History(store).Length == 0 && !File.Exists(store.PathName + ".bak"), "unchanged save broadcasts but does not rotate backups or create history");
+                store.CheckpointMemoHistory(true);
                 store.State.Ideas = "修改后的备忘"; store.Save();
                 Check(History(store).Length == 1 && File.ReadAllBytes(store.PathName + ".bak").SequenceEqual(first), "changed save snapshots the previous contents and rotates the last backup");
                 Check(File.ReadAllBytes(History(store)[0]).SequenceEqual(first), "history retains exact prior persisted bytes");
@@ -94,7 +95,7 @@ namespace LocalDesktopNote
                 try { store.ReadHistorySnapshot(store.PathName); } catch (ArgumentException) { outsideRejected = true; }
                 Check(outsideRejected, "history reader rejects paths outside the history directory");
                 store.State.Ideas = "连续修改一"; store.Save(); store.State.Ideas = "连续修改二"; store.Save();
-                Check(History(store).Length == 3 && History(store).Distinct(StringComparer.OrdinalIgnoreCase).Count() == 3, "rapid saves retain distinct history files without timestamp collisions");
+                Check(History(store).Length == 1, "rapid memo saves merge into the same editing session without intermediate history entries");
                 var reopened = new WorkboardStore(Path.GetDirectoryName(store.PathName));
                 Check(reopened.State.Tasks.Select(t => t.Id).SequenceEqual(store.State.Tasks.Select(t => t.Id)) && reopened.State.Tasks[0].PlanDate == "2028-03-01", "restart preserves task identities, order and dates");
                 Check(reopened.State.TaskDraft == "保留草稿" && reopened.State.DraftPlanDate == "2028-03-02" && reopened.State.X == 33 && reopened.State.Height == 350, "restart preserves draft date, draft text and geometry");
@@ -114,6 +115,7 @@ namespace LocalDesktopNote
 
                 var failure = new WorkboardStore(Path.Combine(root, "history-failure"));
                 failure.State.Ideas = "原始内容"; failure.Save(); byte[] original = File.ReadAllBytes(failure.PathName);
+                failure = new WorkboardStore(Path.GetDirectoryName(failure.PathName));
                 Write(Path.Combine(Path.GetDirectoryName(failure.PathName), "history"), "blocking file");
                 failure.State.Ideas = "新内容"; failure.Save();
                 Check(!String.IsNullOrEmpty(failure.HistoryNotice) && LibraryStore.Read<WorkboardState>(failure.PathName).Ideas == "新内容", "history-directory failure reports the limitation while saving current data");

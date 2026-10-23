@@ -56,6 +56,7 @@ namespace LocalDesktopNote
                 if (request.WaitOne(0)) ShowWorkbench();
                 if (workboard != null && !workboard.IsDisposed) workboard.RefreshDay();
                 if (workbench != null && !workbench.IsDisposed) workbench.RefreshDay();
+                CheckpointMemoHistory();
                 if (Desktop.FindView() != IntPtr.Zero)
                 {
                     if (workboard == null || workboard.IsDisposed) TryCreateWorkboard();
@@ -331,11 +332,27 @@ namespace LocalDesktopNote
             foreach (var entry in notes) if (!entry.Value.Attached) throw new InvalidOperationException("图片未连接到桌面层。");
             if (workboard == null || !workboard.Attached) throw new InvalidOperationException("工作卡未连接到桌面层。");
         }
+        internal void CheckpointMemoHistory()
+        {
+            if (workboardStore == null) return;
+            string historyNotice = workboardStore.HistoryNotice;
+            bool checkpointDue = workboardStore.MemoAutosaveDue;
+            bool flushed = !checkpointDue ||
+                ((workbench == null || workbench.IsDisposed || workbench.Flush()) &&
+                 (workboard == null || workboard.IsDisposed || workboard.Flush()));
+            workboardStore.CheckpointMemoHistory(checkpointDue && flushed);
+            if (historyNotice != workboardStore.HistoryNotice)
+            {
+                if (workboard != null && !workboard.IsDisposed) workboard.RefreshHistoryStatus();
+                if (workbench != null && !workbench.IsDisposed) workbench.RefreshHistoryStatus();
+            }
+        }
         protected override void ExitThreadCore()
         {
             if (exiting) return;
             if (workbench != null && !workbench.Flush()) return;
             if (workboard != null && !workboard.Flush()) { Message("工作卡尚未保存成功，退出已取消。请检查程序文件夹是否可写，或先复制当前内容。", true); return; }
+            if (workboardStore != null) workboardStore.CheckpointMemoHistory(true);
             if (!TrySave())
             {
                 if (manager == null) tray.ShowBalloonTip(5000, "退出已取消", "桌面图片列表尚未保存成功，请检查程序文件夹是否可写后重试。", ToolTipIcon.Warning);

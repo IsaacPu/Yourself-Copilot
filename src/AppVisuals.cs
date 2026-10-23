@@ -39,6 +39,12 @@ namespace LocalDesktopNote
             { "calendar", "日期" }, { "remove", "移除" }
         };
 
+        internal static ImageSource IconSource(string name, Brush foreground)
+        {
+            Geometry geometry = Load((name ?? "").Trim());
+            return geometry == null ? null : new DrawingImage(new GeometryDrawing(foreground ?? SystemColors.ControlTextBrush, null, geometry));
+        }
+
         internal static FrameworkElement Icon(string name, double size, Brush foreground)
         {
             name = (name ?? "").Trim();

@@ -44,6 +44,7 @@ namespace LocalDesktopNote
         private readonly TextBlock status, taskSummary, taskEmpty, historyNotice, settingsNotice;
         private readonly Button undoButton;
         private readonly Border compactMemoHost, fullMemoHost;
+        private readonly MemoSplitLayout memoSplit;
         private readonly TextBlock newTaskPlaceholder;
         private TextBlock taskHeading, taskDate, draftDateSummary;
         private readonly Dictionary<string, FrameworkElement> pages = new Dictionary<string, FrameworkElement>();
@@ -123,7 +124,6 @@ namespace LocalDesktopNote
             tasks.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             tasks.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             tasks.RowDefinitions.Add(new RowDefinition());
-            tasks.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var scopeBar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 16) };
             AddScopeButton(scopeBar, "today", "今天"); AddScopeButton(scopeBar, "tomorrow", "明天"); AddScopeButton(scopeBar, "later", "以后／未安排"); AddScopeButton(scopeBar, "all", "全部");
             Grid.SetRow(scopeBar, 1); tasks.Children.Add(scopeBar);
@@ -144,24 +144,28 @@ namespace LocalDesktopNote
             draftDateSummary = new TextBlock { Foreground = muted, FontSize = 11, Margin = new Thickness(7, 0, 0, 0) }; dateHeader.Children.Add(draftDateSummary);
             var dateExpander = new Expander { Header = dateHeader, Content = dateLine, Margin = new Thickness(0, 7, 0, 0), Foreground = muted, ToolTip = "展开修改这份草稿的计划日期；日期不会随浏览悄悄变化" };
             AutomationProperties.SetName(dateExpander, "新任务计划日期，展开设置"); draftPanel.Children.Add(dateExpander); Grid.SetRow(draftPanel, 2); tasks.Children.Add(draftPanel);
-            var listRoot = new Grid(); listRoot.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); listRoot.RowDefinitions.Add(new RowDefinition());
+            var splitGrid = new Grid(); splitGrid.RowDefinitions.Add(new RowDefinition()); splitGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(28) }); splitGrid.RowDefinitions.Add(new RowDefinition());
+            Grid.SetRow(splitGrid, 3); tasks.Children.Add(splitGrid);
+            var list = new StackPanel();
             var countLine = new DockPanel { Margin = new Thickness(0, 0, 0, 9) };
             undoButton = MakeButton("撤销移除", delegate { UndoRemove(); }); undoButton.FontSize = 11; undoButton.Padding = new Thickness(6, 2, 6, 2); DockPanel.SetDock(undoButton, System.Windows.Controls.Dock.Right); countLine.Children.Add(undoButton);
-            taskSummary = new TextBlock { Foreground = muted, FontSize = 11, VerticalAlignment = VerticalAlignment.Center }; countLine.Children.Add(taskSummary); listRoot.Children.Add(countLine);
-            var list = new StackPanel(); taskEmpty = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = muted, Margin = new Thickness(0, 15, 0, 18) }; list.Children.Add(taskEmpty);
+            taskSummary = new TextBlock { Foreground = muted, FontSize = 11, VerticalAlignment = VerticalAlignment.Center }; countLine.Children.Add(taskSummary); list.Children.Add(countLine);
+            taskEmpty = new TextBlock { TextWrapping = TextWrapping.Wrap, Foreground = muted, Margin = new Thickness(0, 15, 0, 18) }; list.Children.Add(taskEmpty);
             taskRows = new StackPanel(); list.Children.Add(taskRows);
             completedRows = new StackPanel(); CompletedGroup = new Expander { Header = "已完成", Foreground = muted, Margin = new Thickness(0, 17, 0, 5), Padding = new Thickness(0, 8, 0, 0), Content = completedRows };
             AutomationProperties.SetName(CompletedGroup, "工作台已完成任务，展开或收起"); list.Children.Add(CompletedGroup);
             var scroll = new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, 6, 0) };
-            Grid.SetRow(scroll, 1); listRoot.Children.Add(scroll); Grid.SetRow(listRoot, 3); tasks.Children.Add(listRoot);
+            splitGrid.Children.Add(scroll);
+            var divider = MemoSplitLayout.CreateDivider(); Grid.SetRow(divider, 1); splitGrid.Children.Add(divider);
 
             var memoCard = new Grid(); memoCard.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); memoCard.RowDefinitions.Add(new RowDefinition());
-            var memoCardHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+            var memoCardHeader = new DockPanel { Margin = new Thickness(0, 0, 0, 10) };
             var expandMemo = MakeButton("展开随手记", delegate { Navigate("memo"); }); SetIconOnly(expandMemo, "expand", muted, 15); expandMemo.Padding = new Thickness(3); expandMemo.ToolTip = "打开完整随手记"; DockPanel.SetDock(expandMemo, System.Windows.Controls.Dock.Right); memoCardHeader.Children.Add(expandMemo);
-            memoCardHeader.Children.Add(new TextBlock { Text = "随手记", FontSize = 13, FontWeight = FontWeights.Medium, VerticalAlignment = VerticalAlignment.Center }); memoCard.Children.Add(memoCardHeader);
+            memoCardHeader.Children.Add(new TextBlock { Text = "随手记", FontSize = 14, FontWeight = FontWeights.Medium, VerticalAlignment = VerticalAlignment.Center }); memoCard.Children.Add(memoCardHeader);
             compactMemoHost = new Border(); Grid.SetRow(compactMemoHost, 1); memoCard.Children.Add(compactMemoHost);
-            var compactMemo = new Border { CornerRadius = new CornerRadius(10), Background = Brush("#EFF0E8"), Padding = new Thickness(14, 10, 14, 9), Height = 104, Margin = new Thickness(0, 15, 0, 0), Child = memoCard };
-            Grid.SetRow(compactMemo, 4); tasks.Children.Add(compactMemo);
+            var compactMemo = new Border { CornerRadius = new CornerRadius(10), Background = Brush("#FDFCF9"), BorderBrush = Brush("#E5E7DE"), BorderThickness = new Thickness(1), Padding = new Thickness(18), Child = memoCard };
+            Grid.SetRow(compactMemo, 2); splitGrid.Children.Add(compactMemo);
+            memoSplit = new MemoSplitLayout(splitGrid, list, divider, 220, () => Store.State.WorkbenchMemoTaskRatio, value => { Store.State.WorkbenchMemoTaskRatio = value; QueueViewSave(); Flush(); });
 
             var memo = NewPage("memo", "先记下来，再慢慢整理", "随手记连续保存，不随日期切换或任务完成消失。");
             memo.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); memo.RowDefinitions.Add(new RowDefinition());
@@ -174,7 +178,7 @@ namespace LocalDesktopNote
             fullMemoHost = new Border { CornerRadius = new CornerRadius(10), Background = Brush("#EFF0E8"), Padding = new Thickness(18) }; Grid.SetRow(fullMemoHost, 2); memo.Children.Add(fullMemoHost);
             compactMemoHost.Child = IdeasEditor;
 
-            var history = NewPage("history", "找回之前写过的内容", "每次内容变化并成功保存前，保留上一版快照。这里只读查看，可复制需要的文字。");
+            var history = NewPage("history", "找回之前写过的内容", "随手记按编辑过程合并，停笔 30 秒或离开编辑时保留版本；长时间编辑每 5 分钟留恢复点。这里只读查看，可复制文字。");
             history.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); history.RowDefinitions.Add(new RowDefinition());
             historyNotice = new TextBlock { Foreground = muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) }; Grid.SetRow(historyNotice, 1); history.Children.Add(historyNotice);
             var historyGrid = new Grid(); historyGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) }); historyGrid.ColumnDefinitions.Add(new ColumnDefinition());
@@ -204,18 +208,18 @@ namespace LocalDesktopNote
             DraftDatePicker.DateValidationError += delegate(object sender, DatePickerDateValidationErrorEventArgs e) { e.ThrowException = false; ShowStatus("日期无法识别，请从日历选择日期，或勾选“未安排”。", true); };
             UnplannedCheck.Checked += delegate { if (!loading) { DraftDatePicker.IsEnabled = false; UpdateDraftDate(); } };
             UnplannedCheck.Unchecked += delegate { if (!loading) { DraftDatePicker.IsEnabled = true; if (!DraftDatePicker.SelectedDate.HasValue) DraftDatePicker.SelectedDate = Store.Today; UpdateDraftDate(); } };
-            CompletedGroup.Expanded += delegate { if (!rendering && !Store.State.CompletedExpanded) { Store.State.CompletedExpanded = true; QueueViewSave(); } };
-            CompletedGroup.Collapsed += delegate { if (!rendering && Store.State.CompletedExpanded) { Store.State.CompletedExpanded = false; QueueViewSave(); } };
+            CompletedGroup.Expanded += delegate { if (!rendering && !Store.State.CompletedExpanded) { Store.State.CompletedExpanded = true; QueueViewSave(); } if (memoSplit != null) memoSplit.Refresh(); };
+            CompletedGroup.Collapsed += delegate { if (!rendering && Store.State.CompletedExpanded) { Store.State.CompletedExpanded = false; QueueViewSave(); } if (memoSplit != null) memoSplit.Refresh(); };
             HistoryList.SelectionChanged += delegate { ShowHistorySelection(); };
             LaunchAtLoginCheck.Click += delegate { ApplyAutoStart(); };
             StartupCardCheck.Click += delegate { if (!loadingSettings && Store.State.ShowCardOnStartup != (StartupCardCheck.IsChecked == true)) { Store.State.ShowCardOnStartup = StartupCardCheck.IsChecked == true; QueueViewSave(); Flush(); } };
-            View.PreviewKeyDown += delegate(object sender, KeyEventArgs e) { if (e.Key == Key.S && (Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0) { Flush(); e.Handled = true; } };
+            View.PreviewKeyDown += delegate(object sender, KeyEventArgs e) { if (e.Key == Key.S && (Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0) { FinishMemoHistory(); e.Handled = true; } };
             Store.Changed += StoreChanged;
             Store.Saved += StoreSaved;
-            Deactivate += delegate { Flush(); };
+            Deactivate += delegate { FinishMemoHistory(); };
             FormClosing += delegate(object sender, Forms.FormClosingEventArgs e)
             {
-                if (!Flush()) { e.Cancel = true; return; }
+                if (!FinishMemoHistory()) { e.Cancel = true; return; }
                 if (!AllowClose && e.CloseReason == Forms.CloseReason.UserClosing) { e.Cancel = true; Hide(); }
             };
             RefreshContent(); Navigate("tasks");
@@ -274,7 +278,7 @@ namespace LocalDesktopNote
         }
         private void Navigate(string key)
         {
-            if (!pages.ContainsKey(key) || !Flush()) return;
+            if (!pages.ContainsKey(key) || !(page == key ? Flush() : FinishMemoHistory())) return;
             page = key;
             MoveMemoEditor(key == "memo");
             foreach (var item in pages) item.Value.Visibility = item.Key == key ? Visibility.Visible : Visibility.Collapsed;
@@ -430,6 +434,7 @@ namespace LocalDesktopNote
                 pendingRefresh = false;
             }
             finally { rendering = false; }
+            if (memoSplit != null) memoSplit.Refresh();
         }
         private TextBlock SectionLabel(string text, int count)
         {
@@ -601,6 +606,19 @@ namespace LocalDesktopNote
             }
             finally { saving = false; }
         }
+        internal bool FinishMemoHistory()
+        {
+            if (!Flush()) return false;
+            bool hadNotice = !String.IsNullOrEmpty(Store.HistoryNotice);
+            if (!Store.CheckpointMemoHistory(true) || hadNotice)
+                ShowStatus(Store.HistoryNotice ?? "已保存在本机 · " + DateTime.Now.ToString("HH:mm"), !String.IsNullOrEmpty(Store.HistoryNotice));
+            return true;
+        }
+        internal void RefreshHistoryStatus()
+        {
+            if (dirty || saveFailed || disposed) return;
+            ShowStatus(Store.HistoryNotice ?? "已保存在本机 · " + DateTime.Now.ToString("HH:mm"), !String.IsNullOrEmpty(Store.HistoryNotice));
+        }
         private void ShowStatus(string text, bool error)
         {
             // Validation can add context, but only successful persistence may
@@ -643,6 +661,7 @@ namespace LocalDesktopNote
             }
             finally { loading = false; }
             if (TaskEditors.Any(t => t.IsKeyboardFocusWithin)) pendingRefresh = true; else RenderTasks();
+            if (memoSplit != null) memoSplit.Refresh();
             if (page == "settings") RefreshSettings();
             if (!dirty && !String.IsNullOrEmpty(Store.HistoryNotice)) ShowStatus(Store.HistoryNotice, true);
             else if (!dirty && !String.IsNullOrEmpty(Store.Notice)) ShowStatus(Store.Notice, true);
@@ -658,7 +677,7 @@ namespace LocalDesktopNote
                     var entry = new ListBoxItem { Content = file.LastWriteTime.ToString("yyyy-MM-dd  HH:mm:ss", CultureInfo.InvariantCulture), Tag = file.FullName, Padding = new Thickness(5, 7, 5, 7), ToolTip = "只读历史快照" };
                     HistoryList.Items.Add(entry);
                 }
-                historyNotice.Text = files.Count == 0 ? "尚无历史快照。已有内容发生变化并成功保存后，上一版会自动出现在这里。" : "显示最近 " + files.Count + " 个历史快照；当前内容请在“任务”和“随手记”中查看。";
+                historyNotice.Text = files.Count == 0 ? "尚无历史快照。随手记停笔 30 秒、离开编辑或按 Ctrl+S 时会保留版本；连续输入不会逐字增加历史。" : "显示最近 " + files.Count + " 个历史快照；随手记的新记录按编辑过程合并，大段删除前另留恢复点。当前内容请在“任务”和“随手记”中查看。";
                 if (files.Count > 0) HistoryList.SelectedIndex = 0;
             }
             catch (Exception error) { historyNotice.Text = "暂时无法读取历史记录：" + error.Message; HistoryPreview.Text = "当前任务与备忘不受影响。"; }
@@ -717,7 +736,7 @@ namespace LocalDesktopNote
         {
             if (disposing && !disposed)
             {
-                Flush(); disposed = true; if (activeTaskMenu != null) activeTaskMenu.IsOpen = false; Store.Changed -= StoreChanged; Store.Saved -= StoreSaved; saveTimer.Dispose();
+                FinishMemoHistory(); disposed = true; if (activeTaskMenu != null) activeTaskMenu.IsOpen = false; Store.Changed -= StoreChanged; Store.Saved -= StoreSaved; saveTimer.Dispose(); if (memoSplit != null) memoSplit.Dispose();
             }
             base.Dispose(disposing);
         }

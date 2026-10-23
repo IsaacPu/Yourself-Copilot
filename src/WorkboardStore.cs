@@ -33,6 +33,8 @@ namespace LocalDesktopNote
         [DataMember] public bool ShowCardOnStartup = true;
         [DataMember] public string TaskScope = "today";
         [DataMember(EmitDefaultValue = false)] public string DraftPlanDate;
+        [DataMember(EmitDefaultValue = false)] public double? WorkbenchMemoTaskRatio;
+        [DataMember(EmitDefaultValue = false)] public double? CardMemoTaskRatio;
 
         [OnDeserializing]
         private void InitializeNewDefaults(StreamingContext context)
@@ -50,6 +52,7 @@ namespace LocalDesktopNote
         internal string Notice;
         internal string HistoryNotice;
         internal Func<DateTime> TodayProvider = delegate { return DateTime.Today; };
+        internal Func<DateTime> UtcNowProvider = delegate { return DateTime.UtcNow; };
         internal DateTime Today { get { return TodayProvider().Date; } }
         internal event EventHandler Changed;
         internal event EventHandler Saved;
@@ -57,6 +60,26 @@ namespace LocalDesktopNote
         private bool notifying;
         private byte[] previousSavedBytes;
         private byte[] previousContentBytes;
+        private byte[] previousOtherContentBytes, lastHistoryContentBytes;
+        private byte[] pendingHistoryBytes, pendingHistoryContentBytes;
+        private string previousIdeas;
+        private bool memoHistoryPending;
+        private DateTime? unsavedMemoSinceUtc;
+        private DateTime lastMemoEditUtc, memoCheckpointUtc, historyRetryUtc;
+        private static readonly TimeSpan MemoIdle = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan MemoInterval = TimeSpan.FromMinutes(5);
+
+        // Continuous typing can keep postponing the editor's short debounce.
+        // Ask the UI to flush first; history still accepts only persisted bytes.
+        internal bool MemoAutosaveDue
+        {
+            get
+            {
+                if (!unsavedMemoSinceUtc.HasValue || previousIdeas == (State.Ideas ?? "")) return false;
+                DateTime started = memoHistoryPending ? memoCheckpointUtc : unsavedMemoSinceUtc.Value;
+                return UtcNowProvider() - started >= MemoInterval;
+            }
+        }
 
         internal WorkboardStore(string folder)
         {
@@ -65,6 +88,8 @@ namespace LocalDesktopNote
             HistoryFolder = Path.Combine(folder, "history", "workboard");
             State = Load();
             previousContentBytes = ContentBytes(State);
+            previousOtherContentBytes = ContentBytes(State, false);
+            previousIdeas = State.Ideas ?? "";
             State.Ideas = State.Ideas ?? "";
             State.TaskDraft = State.TaskDraft ?? "";
             State.Tasks = State.Tasks ?? new List<WorkTask>();
@@ -81,6 +106,14 @@ namespace LocalDesktopNote
             DateTime date;
             if (State.Tasks.Concat(State.Removed).Any(t => !String.IsNullOrEmpty(t.PlanDate) && !TryPlanDate(t.PlanDate, out date)))
                 Notice = (String.IsNullOrEmpty(Notice) ? "" : Notice + "\n") + "部分任务的计划日期无法识别，已保留在“以后／未安排”中，可重新安排日期。";
+            // A final checkpoint from the previous run is already a recovery version.
+            // Compare content, not geometry or serialization bytes, when deduplicating it.
+            try
+            {
+                string latest = Directory.Exists(HistoryFolder) ? Directory.EnumerateFiles(HistoryFolder, "*.json", SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault() : null;
+                if (latest != null) lastHistoryContentBytes = ContentBytes(Read(latest));
+            }
+            catch { /* An unreadable history entry must not prevent loading current data. */ }
         }
 
         private static void Normalize(WorkTask task)
@@ -203,6 +236,11 @@ namespace LocalDesktopNote
                 bytes = buffer.ToArray();
             }
             byte[] contentBytes = ContentBytes(State);
+            byte[] otherContentBytes = ContentBytes(State, false);
+            DateTime now = UtcNowProvider();
+            bool memoChanged = previousIdeas != (State.Ideas ?? "");
+            bool otherContentChanged = !otherContentBytes.SequenceEqual(previousOtherContentBytes);
+            bool newMemoSession = !memoHistoryPending || now - lastMemoEditUtc >= MemoIdle;
             bool primaryExists = File.Exists(PathName);
             bool primaryMatchesSaved = primaryExists && previousSavedBytes != null && File.ReadAllBytes(PathName).SequenceEqual(previousSavedBytes);
             if (primaryExists && previousSavedBytes != null && !primaryMatchesSaved && !preserveBackup)
@@ -214,6 +252,7 @@ namespace LocalDesktopNote
             }
             if (!preserveBackup && primaryMatchesSaved && bytes.SequenceEqual(previousSavedBytes))
             {
+                CheckpointMemoHistory();
                 NotifySaved();
                 NotifyChanged();
                 return;
@@ -226,14 +265,26 @@ namespace LocalDesktopNote
                     stream.Write(bytes, 0, bytes.Length);
                     stream.Flush(true);
                 }
-                if (previousSavedBytes != null && !contentBytes.SequenceEqual(previousContentBytes)) PreserveHistory(previousSavedBytes);
+                if (previousSavedBytes != null && !contentBytes.SequenceEqual(previousContentBytes) &&
+                    (otherContentChanged || !memoChanged || newMemoSession || RemovesSubstantialText(previousIdeas, State.Ideas ?? "")))
+                    PreserveHistory(previousSavedBytes, previousContentBytes, false);
                 if (File.Exists(PathName)) File.Replace(temporary, PathName, preserveBackup ? null : PathName + ".bak");
                 else File.Move(temporary, PathName);
                 previousSavedBytes = bytes;
                 previousContentBytes = contentBytes;
+                previousOtherContentBytes = otherContentBytes;
+                previousIdeas = State.Ideas ?? "";
+                unsavedMemoSinceUtc = null;
+                if (memoChanged)
+                {
+                    if (newMemoSession) memoCheckpointUtc = now;
+                    lastMemoEditUtc = now;
+                    memoHistoryPending = true;
+                }
                 preserveBackup = false;
             }
             finally { if (File.Exists(temporary)) try { File.Delete(temporary); } catch { } }
+            CheckpointMemoHistory();
             NotifySaved();
             NotifyChanged();
         }
@@ -244,12 +295,12 @@ namespace LocalDesktopNote
             if (handler != null) handler(this, EventArgs.Empty);
         }
 
-        private static byte[] ContentBytes(WorkboardState state)
+        private static byte[] ContentBytes(WorkboardState state, bool includeIdeas = true)
         {
             // History follows written content, task order and task state; window settings are not revisions.
             var content = new WorkboardState
             {
-                Ideas = state.Ideas ?? "",
+                Ideas = includeIdeas ? state.Ideas ?? "" : "",
                 TaskDraft = state.TaskDraft ?? "",
                 DraftPlanDate = state.DraftPlanDate,
                 Tasks = state.Tasks ?? new List<WorkTask>(),
@@ -262,14 +313,58 @@ namespace LocalDesktopNote
             }
         }
 
-        private void PreserveHistory(byte[] bytes)
+        private static bool RemovesSubstantialText(string before, string after)
         {
+            if (before.Length == 0 || before == after) return false;
+            if (String.IsNullOrWhiteSpace(after)) return true;
+            int prefix = 0, suffix = 0;
+            while (prefix < before.Length && prefix < after.Length && before[prefix] == after[prefix]) prefix++;
+            while (suffix < before.Length - prefix && suffix < after.Length - prefix && before[before.Length - suffix - 1] == after[after.Length - suffix - 1]) suffix++;
+            int removed = before.Length - prefix - suffix;
+            return removed >= 20 && removed >= before.Length * 0.3;
+        }
+
+        // Current content is saved independently. Only successfully persisted memo
+        // versions can become checkpoints; a timer never promotes unsaved input.
+        internal bool CheckpointMemoHistory(bool force = false)
+        {
+            DateTime now = UtcNowProvider();
+            if (pendingHistoryBytes != null && (force || now >= historyRetryUtc))
+                if (!PreserveHistory(pendingHistoryBytes, pendingHistoryContentBytes, force)) return false;
+            if (!memoHistoryPending || previousSavedBytes == null) return true;
+            if (!force && now - lastMemoEditUtc < MemoIdle && now - memoCheckpointUtc < MemoInterval) return true;
+            if (!ContentBytes(State).SequenceEqual(previousContentBytes)) return true;
+            if (!PreserveHistory(previousSavedBytes, previousContentBytes, force)) return false;
+            memoHistoryPending = false;
+            memoCheckpointUtc = now;
+            return true;
+        }
+
+        private bool PreserveHistory(byte[] bytes, byte[] contentBytes, bool force)
+        {
+            // Keep the earliest failed recovery candidate in memory while current
+            // autosaves continue. Retry it before writing a newer checkpoint.
+            if (pendingHistoryBytes != null)
+            {
+                if (!force && UtcNowProvider() < historyRetryUtc) return false;
+                if (!WriteHistory(pendingHistoryBytes, pendingHistoryContentBytes)) return false;
+                pendingHistoryBytes = pendingHistoryContentBytes = null;
+            }
+            if (WriteHistory(bytes, contentBytes)) return true;
+            pendingHistoryBytes = bytes;
+            pendingHistoryContentBytes = contentBytes;
+            return false;
+        }
+
+        private bool WriteHistory(byte[] bytes, byte[] contentBytes)
+        {
+            if (lastHistoryContentBytes != null && lastHistoryContentBytes.SequenceEqual(contentBytes)) { HistoryNotice = null; return true; }
             string temporary = null;
             try
             {
                 string folder = Path.Combine(HistoryFolder, Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
                 Directory.CreateDirectory(folder);
-                string path = Path.Combine(folder, DateTime.Now.ToString("HHmmss", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N") + ".json");
+                string path = Path.Combine(folder, UtcNowProvider().ToLocalTime().ToString("HHmmss", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N") + ".json");
                 temporary = path + ".tmp";
                 using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
@@ -277,11 +372,15 @@ namespace LocalDesktopNote
                     stream.Flush(true);
                 }
                 File.Move(temporary, path);
+                lastHistoryContentBytes = contentBytes;
                 HistoryNotice = null;
+                return true;
             }
             catch (Exception)
             {
                 HistoryNotice = "本次历史快照未能保存；当前内容仍会保存，请检查 history 文件夹的权限和可用空间。";
+                historyRetryUtc = UtcNowProvider() + MemoIdle;
+                return false;
             }
             finally { if (temporary != null && File.Exists(temporary)) try { File.Delete(temporary); } catch { } }
         }
@@ -296,6 +395,8 @@ namespace LocalDesktopNote
 
         internal void NotifyChanged()
         {
+            if (previousIdeas == (State.Ideas ?? "")) unsavedMemoSinceUtc = null;
+            else if (!unsavedMemoSinceUtc.HasValue) unsavedMemoSinceUtc = UtcNowProvider();
             if (notifying) return;
             try
             {

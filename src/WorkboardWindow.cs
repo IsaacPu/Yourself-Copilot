@@ -35,6 +35,7 @@ namespace LocalDesktopNote
         private System.Drawing.Size roundedRegionSize;
         private double roundedRadiusX, roundedRadiusY;
         private readonly Forms.Timer saveTimer;
+        private readonly MemoSplitLayout memoSplit;
         private readonly StackPanel rows, completedRows;
         private readonly TextBlock status;
         private readonly ContextMenu menu;
@@ -106,6 +107,11 @@ namespace LocalDesktopNote
             Find<Button>("ExpandMemoButton").Click += delegate { EndEditing(); if (OpenMemo != null) OpenMemo(); else if (OpenWorkbench != null) OpenWorkbench(); };
             saveTimer = new Forms.Timer { Interval = 600 };
             saveTimer.Tick += delegate { saveTimer.Stop(); Flush(); };
+            var memoDivider = Find<GridSplitter>("MemoDivider");
+            memoDivider.PreviewMouseLeftButtonDown += delegate { if (!editing) BeginEditing(memoDivider); };
+            memoSplit = new MemoSplitLayout(Find<Grid>("MemoSplitPanel"), Find<StackPanel>("TaskContents"), memoDivider, 136,
+                delegate { return Store.State.CardMemoTaskRatio; },
+                delegate(double? value) { Store.State.CardMemoTaskRatio = value; QueueViewSave(); Flush(); });
             loading = true; IdeasEditor.Text = Store.State.Ideas; NewTaskEditor.Text = Store.State.TaskDraft; loading = false;
             IdeasEditor.TextChanged += delegate { if (loading) return; Store.State.Ideas = IdeasEditor.Text; UpdatePlaceholders(); QueueSave(); };
             NewTaskEditor.TextChanged += delegate { if (loading) return; Store.State.TaskDraft = NewTaskEditor.Text; if (String.IsNullOrWhiteSpace(NewTaskEditor.Text)) Store.State.DraftPlanDate = null; else if (Store.State.DraftPlanDate == null) Store.State.DraftPlanDate = WorkboardStore.FormatPlanDate(DefaultDraftDate()) ?? ""; UpdatePlaceholders(); QueueSave(); };
@@ -123,8 +129,8 @@ namespace LocalDesktopNote
                 string selected = scope;
                 Find<Button>("Scope_" + scope).Click += delegate { SelectScope(selected); };
             }
-            CompletedGroup.Expanded += delegate { if (!renderingTasks && !Store.State.CompletedExpanded) { Store.State.CompletedExpanded = true; QueueViewSave(); } };
-            CompletedGroup.Collapsed += delegate { if (!renderingTasks && Store.State.CompletedExpanded) { Store.State.CompletedExpanded = false; QueueViewSave(); } };
+            CompletedGroup.Expanded += delegate { if (!renderingTasks && !Store.State.CompletedExpanded) { Store.State.CompletedExpanded = true; QueueViewSave(); memoSplit.Refresh(); } };
+            CompletedGroup.Collapsed += delegate { if (!renderingTasks && Store.State.CompletedExpanded) { Store.State.CompletedExpanded = false; QueueViewSave(); memoSplit.Refresh(); } };
             menu = new ContextMenu { FontFamily = AppTypography.Body };
             var lockItem = new MenuItem { Header = "锁定位置和大小", IsCheckable = true };
             lockItem.Click += delegate { if (Store.State.Locked == lockItem.IsChecked) return; Store.State.Locked = lockItem.IsChecked; UpdateLock(); QueueViewSave(true); };
@@ -150,7 +156,7 @@ namespace LocalDesktopNote
             View.PreviewKeyDown += delegate(object sender, KeyEventArgs e)
             {
                 if (e.Key == Key.Escape && editing) { EndEditing(); e.Handled = true; }
-                if (e.Key == Key.S && (Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0) { Flush(); e.Handled = true; }
+                if (e.Key == Key.S && (Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0) { FinishMemoHistory(); e.Handled = true; }
             };
             Deactivate += delegate
             {
@@ -164,7 +170,7 @@ namespace LocalDesktopNote
             };
             FormClosing += delegate(object sender, Forms.FormClosingEventArgs e)
             {
-                if (!disposing && !Flush()) { e.Cancel = true; return; }
+                if (!disposing && !FinishMemoHistory()) { e.Cancel = true; return; }
                 if (!disposing && e.CloseReason == Forms.CloseReason.UserClosing) { e.Cancel = true; HideCard(); }
             };
             RenderTasks(); UpdatePlaceholders(); UpdateLock();
@@ -269,11 +275,11 @@ namespace LocalDesktopNote
         {
             if (editing) EndEditing();
             bool changed = !Store.State.Hidden;
-            Store.State.Hidden = true; Hide(); if (changed) QueueViewSave(true); Flush();
+            Store.State.Hidden = true; Hide(); if (changed) QueueViewSave(true); FinishMemoHistory();
             if (VisibilityChanged != null) VisibilityChanged(this, EventArgs.Empty);
         }
 
-        internal void BeginEditing(TextBox editor)
+        internal void BeginEditing(UIElement editor)
         {
             if (disposing) return;
             if (!editing)
@@ -290,7 +296,7 @@ namespace LocalDesktopNote
         {
             if (!editing) return;
             foreach (var input in TaskEditors) CommitTaskTitle(input, (WorkTask)input.Tag);
-            if (!Flush()) return;
+            if (!FinishMemoHistory()) return;
             try { ChangeNativeParent(true, ScreenRectangle); }
             catch (Exception error) { Storage.Log(error.ToString()); status.Text = "内容已保留 · 下次离开输入区时重试连接桌面"; status.ToolTip = error.Message; }
         }
@@ -627,6 +633,7 @@ namespace LocalDesktopNote
             CompletedGroup.IsExpanded = Store.State.CompletedExpanded;
             Find<Button>("UndoTaskButton").Visibility = Store.State.Removed.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
             UpdateTaskCount(); renderingTasks = false; pendingDayRefresh = false;
+            memoSplit.Refresh();
         }
         internal void SelectScope(string scope)
         {
@@ -767,6 +774,17 @@ namespace LocalDesktopNote
             status.Text = String.IsNullOrEmpty(Store.HistoryNotice) ? "已保存到本机" : "已保存 · 历史备份需检查"; status.ToolTip = Store.HistoryNotice ?? Store.Notice;
             status.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(126, 144, 117));
         }
+        internal bool FinishMemoHistory()
+        {
+            if (!Flush()) return false;
+            bool hadNotice = !String.IsNullOrEmpty(Store.HistoryNotice);
+            if (!Store.CheckpointMemoHistory(true) || hadNotice) ShowSavedStatus();
+            return true;
+        }
+        internal void RefreshHistoryStatus()
+        {
+            if (!dirty && !saveFailed && !disposing) ShowSavedStatus();
+        }
         protected override void WndProc(ref Forms.Message message)
         {
             if (message.Msg == 0x21 && !editing) { message.Result = new IntPtr(3); return; }
@@ -777,7 +795,7 @@ namespace LocalDesktopNote
         {
             if (value && !disposing)
             {
-                Flush(); disposing = true; Store.Changed -= storeChanged; Store.Saved -= storeSaved; saveTimer.Dispose(); menu.IsOpen = false; if (taskPlanMenu != null) taskPlanMenu.IsOpen = false; host.Dispose();
+                FinishMemoHistory(); disposing = true; Store.Changed -= storeChanged; Store.Saved -= storeSaved; saveTimer.Dispose(); memoSplit.Dispose(); menu.IsOpen = false; if (taskPlanMenu != null) taskPlanMenu.IsOpen = false; host.Dispose();
             }
             base.Dispose(value);
             if (value) Region = null;
