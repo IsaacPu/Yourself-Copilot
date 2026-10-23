@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading;
 using System.Windows.Controls;
+using System.Windows.Input;
 using Forms = System.Windows.Forms;
 
 namespace LocalDesktopNote
@@ -50,22 +51,75 @@ namespace LocalDesktopNote
             bool previous = (bool)loading.GetValue(window); loading.SetValue(window, true);
             try { editor.Text = text; } finally { loading.SetValue(window, previous); }
         }
-        private static void Titles()
+        private static int HistoryCount(Fixture f)
         {
-            using (var f = new Fixture("titles"))
+            return Directory.Exists(f.Store.HistoryFolder) ? Directory.GetFiles(f.Store.HistoryFolder, "*.json", SearchOption.AllDirectories).Length : 0;
+        }
+        private static string[] HistoryTitles(Fixture f)
+        {
+            return Directory.Exists(f.Store.HistoryFolder) ? Directory.GetFiles(f.Store.HistoryFolder, "*.json", SearchOption.AllDirectories)
+                .SelectMany(path => f.Store.ReadHistorySnapshot(path).Tasks.Select(task => task.Text)).ToArray() : new string[0];
+        }
+        private static void CommitTitle(Fixture f, bool card)
+        {
+            if (card) typeof(WorkboardWindow).GetMethod("CommitTaskTitle", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(f.Card, new object[] { f.Card.TaskEditors.Single(), f.Store.State.Tasks.Single() });
+            else typeof(WorkbenchWindow).GetMethod("CommitTitle", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(f.Bench, new object[] { f.Bench.TaskEditors.Single() });
+        }
+        private static void Titles(bool card)
+        {
+            using (var f = new Fixture(card ? "card-title-commit" : "bench-title-commit"))
             {
-                f.Card.TaskEditors.Single().Text = "卡片刚改的新标题";
-                Check(f.Bench.TaskEditors.Single().Text == "卡片刚改的新标题", "task-title edits synchronize the other view before any timer tick");
-                StaleView(f.Bench, f.Bench.TaskEditors.Single(), "旧工作台镜像");
-                f.Bench.Flush(); f.Card.Flush();
-                Check(new WorkboardStore(Path.GetDirectoryName(f.Store.PathName)).State.Tasks.Single().Text == "卡片刚改的新标题", "a clean workbench flush cannot overwrite the shared title from an old editor projection");
-                f.Bench.TaskEditors.Single().Text = "  工作台真实修改并修剪  "; f.Bench.Flush();
-                Check(f.Store.State.Tasks.Single().Text == "工作台真实修改并修剪" && f.Bench.TaskEditors.Single().Text == "工作台真实修改并修剪", "real title edits still trim and persist normally");
-                StaleView(f.Card, f.Card.TaskEditors.Single(), "  旧卡片镜像  ");
-                typeof(WorkboardWindow).GetMethod("CommitTaskTitle", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(f.Card, new object[] { f.Card.TaskEditors.Single(), f.Store.State.Tasks.Single() });
-                Check(f.Store.State.Tasks.Single().Text == "工作台真实修改并修剪", "a stale whitespace-bearing card projection cannot overwrite the latest peer title during commit");
-                f.Bench.TaskEditors.Single().Text = "   "; f.Bench.Flush();
-                Check(f.Bench.TaskEditors.Single().Text == "工作台真实修改并修剪" && f.Store.State.Tasks.Single().Text == "工作台真实修改并修剪", "clearing a task title restores the last valid shared value");
+                string name = card ? "card" : "workbench"; int history = HistoryCount(f);
+                TextBox editor = card ? f.Card.TaskEditors.Single() : f.Bench.TaskEditors.Single();
+                foreach (string input in new[] { "原任务标题g", "原任务标题guo", "原任务标题郭" })
+                {
+                    editor.Text = input; f.Card.Flush(); f.Bench.Flush();
+                    Check(f.Store.State.Tasks.Single().Text == "原任务标题" && new WorkboardStore(Path.GetDirectoryName(f.Store.PathName)).State.Tasks.Single().Text == "原任务标题" && HistoryCount(f) == history,
+                        name + " typing and pinyin remain an editor buffer during ordinary and peer flushes");
+                }
+                Pump(750);
+                Check(f.Store.State.Tasks.Single().Text == "原任务标题" && HistoryCount(f) == history, name + " the real 600ms autosave deadline never submits a title buffer");
+                if (card) { f.Bench.NewTaskEditor.Text = "同伴保存草稿"; f.Bench.Flush(); }
+                else { f.Card.NewTaskEditor.Text = "同伴保存草稿"; f.Card.Flush(); }
+                Check(editor.Text == "原任务标题郭" && (card ? f.Card.TaskEditors.Single() : f.Bench.TaskEditors.Single()) == editor,
+                    name + " unfinished title survives an unrelated peer save and refresh");
+                editor.Text = "  完整的任务新标题  ";
+                Check(card ? f.Card.FinishMemoHistory() : f.Bench.FinishMemoHistory(), name + " explicit save accepts the final title");
+                Check(f.Store.State.Tasks.Single().Text == "完整的任务新标题" && new WorkboardStore(Path.GetDirectoryName(f.Store.PathName)).State.Tasks.Single().Text == "完整的任务新标题",
+                    name + " explicit save trims and persists the final title once");
+                string[] titles = HistoryTitles(f);
+                Check(titles.Count(text => text == "完整的任务新标题") == 1 && !titles.Any(text => text.Contains("guo") || text.EndsWith("郭", StringComparison.Ordinal)),
+                    name + " history contains the final committed title without typing intermediates");
+                object peer = card ? (object)f.Bench : f.Card;
+                TextBox mirror = card ? f.Bench.TaskEditors.Single() : f.Card.TaskEditors.Single();
+                StaleView(peer, mirror, "  旧镜像标题  "); CommitTitle(f, !card);
+                f.Card.Flush(); f.Bench.Flush();
+                Check(f.Store.State.Tasks.Single().Text == "完整的任务新标题", name + " stale peer projection cannot overwrite a committed title");
+                editor = card ? f.Card.TaskEditors.Single() : f.Bench.TaskEditors.Single(); editor.Text = "   "; CommitTitle(f, card);
+                Check(editor.Text == "完整的任务新标题" && f.Store.State.Tasks.Single().Text == "完整的任务新标题", name + " empty title submission restores the last committed value");
+                editor.Text = "失败后仍保留的最终标题";
+                using (var locked = new FileStream(f.Store.PathName, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    Check(!(card ? f.Card.FinishMemoHistory() : f.Bench.FinishMemoHistory()) && editor.Text == "失败后仍保留的最终标题" && !HistoryTitles(f).Contains("失败后仍保留的最终标题"),
+                        name + " failed explicit save retains the submitted editor text without a false final history version");
+                }
+                Check((card ? f.Card.FinishMemoHistory() : f.Bench.FinishMemoHistory()) && new WorkboardStore(Path.GetDirectoryName(f.Store.PathName)).State.Tasks.Single().Text == "失败后仍保留的最终标题",
+                    name + " failed title submission remains retryable");
+            }
+        }
+        private static void TitleSubmissionBoundaries(bool card)
+        {
+            using (var f = new Fixture(card ? "card-title-boundaries" : "bench-title-boundaries"))
+            {
+                string name = card ? "card" : "workbench";
+                TextBox editor = card ? f.Card.TaskEditors.Single() : f.Bench.TaskEditors.Single();
+                editor.Text = "失焦后保存的完整任务";
+                editor.RaiseEvent(new KeyboardFocusChangedEventArgs(Keyboard.PrimaryDevice, 0, editor, card ? f.Card.NewTaskEditor : f.Bench.NewTaskEditor) { RoutedEvent = Keyboard.LostKeyboardFocusEvent });
+                Check(new WorkboardStore(Path.GetDirectoryName(f.Store.PathName)).State.Tasks.Single().Text == "失焦后保存的完整任务", name + " routed focus departure submits and persists the title");
+                editor = card ? f.Card.TaskEditors.Single() : f.Bench.TaskEditors.Single(); editor.Text = "切页前保存的完整任务";
+                if (card) f.Card.SelectScope("all");
+                else typeof(WorkbenchWindow).GetMethod("Navigate", BindingFlags.Instance | BindingFlags.NonPublic).Invoke(f.Bench, new object[] { "history" });
+                Check(new WorkboardStore(Path.GetDirectoryName(f.Store.PathName)).State.Tasks.Single().Text == "切页前保存的完整任务", name + " explicit page navigation submits and persists the title before changing the view");
             }
         }
         private static void Drafts(bool card)
@@ -141,7 +195,7 @@ namespace LocalDesktopNote
             try
             {
                 Forms.Application.EnableVisualStyles(); Forms.Application.SetCompatibleTextRenderingDefault(false);
-                Titles(); Drafts(true); Drafts(false); PeerSaveAfterError(true); PeerSaveAfterError(false); BroadcastDeadline();
+                Titles(true); Titles(false); TitleSubmissionBoundaries(true); TitleSubmissionBoundaries(false); Drafts(true); Drafts(false); PeerSaveAfterError(true); PeerSaveAfterError(false); BroadcastDeadline();
                 PersistenceSignals();
                 Report.AppendLine("Passed: " + passed + "; Failed: " + failed);
                 Report.AppendLine("LIMIT: no Form.Show/Attach or native input/focus automation; stale projections are injected under the same loading guard used by rendering.");

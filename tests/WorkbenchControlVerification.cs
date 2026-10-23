@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -31,7 +31,7 @@ internal static class WorkbenchControlVerification {
    Check(!yesterday.Done && window.TaskEditors[0].Text=="昨天原计划" && yesterday.PlanDate==WorkboardStore.FormatPlanDate(initialDay.AddDays(-1)),"restore keeps original date and position");
    window.SelectScope("tomorrow"); Check(window.TaskChecks.Count==1 && window.TaskEditors[0].Text==tomorrow.Text,"tomorrow scope uses concrete date");
    window.SelectScope("later"); Check(window.TaskChecks.Count==1 && window.TaskEditors[0].Text==later.Text,"unscheduled tasks appear in later scope");
-   window.SelectScope("all"); window.TaskEditors[0].Text="   "; Check(window.Flush() && yesterday.Text=="昨天原计划" && window.TaskEditors[0].Text==yesterday.Text,"blank title preserves last valid content");
+   window.SelectScope("all"); window.TaskEditors[0].Text="   "; Check(window.FinishMemoHistory() && yesterday.Text=="昨天原计划" && window.TaskEditors[0].Text==yesterday.Text,"blank title preserves last valid content");
    window.NewTaskEditor.Text="添加到明天"; window.DraftDatePicker.SelectedDate=store.Today.AddDays(1); window.AddDraft();
    Check(store.State.Tasks.Last().PlanDate==WorkboardStore.FormatPlanDate(initialDay.AddDays(1)) && window.CurrentScope=="tomorrow" && window.NewTaskEditor.Text=="","adding planned task clears draft and reveals its group");
    window.NewTaskEditor.Text="添加到未安排"; window.UnplannedCheck.IsChecked=true; window.AddDraft();
@@ -49,7 +49,17 @@ internal static class WorkbenchControlVerification {
    store.State.Ideas="来自桌面卡片的新内容"; store.Save(); Check(window.IdeasEditor.Text==store.State.Ideas,"external store saves synchronize inactive editor");
    Check(Directory.GetFiles(store.HistoryFolder,"*.json",SearchOption.AllDirectories).Length>0,"content edits produce read-only history material");
    Click(All<Button>(window.View).Single(b=>Convert.ToString(b.Content)=="历史记录"));
-   Check(window.HistoryList.Items.Count>0 && window.HistoryPreview.Text.Contains("随手记") && !window.HistoryPreview.Text.Contains("\"Version\":"),"history presents human-readable read-only content");
+   var historyPanel=(HistoryPanel)typeof(WorkbenchWindow).GetField("historyPanel",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(window);
+   Check(historyPanel.CurrentCategory=="memo" && historyPanel.CurrentFilter=="archive" && window.HistoryList.Items.Count==0,"history defaults to deliberately stored papers rather than automatic recovery versions");
+   historyPanel.SelectCategory("memo","versions");
+   Check(window.HistoryList.Items.Count>0 && window.HistoryPreview.IsReadOnly && historyPanel.Entries.Any(e=>e.Text==window.HistoryPreview.Text) && !window.HistoryPreview.Text.Contains("\"Version\":"),"history presents human-readable read-only content");
+   var expectedMemoVersions=Directory.GetFiles(store.HistoryFolder,"*.json",SearchOption.AllDirectories).Select(path=>store.ReadHistorySnapshot(path).Ideas).Where(text=>!String.IsNullOrWhiteSpace(text)).Distinct().ToArray();
+   foreach(string version in expectedMemoVersions) {
+    int versionIndex=historyPanel.Entries.FindIndex(e=>e.Text==version); window.HistoryList.SelectedIndex=versionIndex;
+    Check(versionIndex>=0 && window.HistoryPreview.IsReadOnly && window.HistoryPreview.Text==version,"every automatic memo recovery version is selectable as exact read-only original text");
+   }
+   historyPanel.SelectCategory("task","versions");
+   Check(window.HistoryList.Items.Count>0 && window.HistoryPreview.IsReadOnly && window.HistoryPreview.Text.Contains("任务") && !window.HistoryPreview.Text.Contains("来自桌面卡片的新内容") && !window.HistoryPreview.Text.Contains("保存失败时保留的文字") && historyPanel.RestoreButton.Visibility==Visibility.Collapsed,"task history remains readable and read-only without unrelated memo content or overwrite action");
    bool autoStart=false; window.GetAutoStart=delegate { return autoStart; }; window.SetAutoStart=delegate(bool value) { autoStart=value; };
    Click(All<Button>(window.View).Single(b=>Convert.ToString(b.Content)=="设置"));
    Check(window.LaunchAtLoginCheck.IsChecked==false && window.StartupCardCheck.IsChecked==true,"startup and card visibility settings have separate true state");

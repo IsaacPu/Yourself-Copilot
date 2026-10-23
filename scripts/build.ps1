@@ -43,7 +43,7 @@ if ($LASTEXITCODE -ne 0) { throw '编译失败。' }
 foreach ($name in @('WorkboardView.xaml','CompactWindow.xaml')) {
     Copy-Item -LiteralPath (Join-Path $sourceRoot $name) -Destination $outputRoot -Force
 }
-foreach ($directory in @('fonts','icons')) {
+foreach ($directory in @('fonts','icons','illustrations')) {
     Copy-Item -LiteralPath (Join-Path $assetRoot $directory) -Destination $outputRoot -Recurse -Force
 }
 Write-Output "Build complete: $executable (v$Version)"

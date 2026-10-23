@@ -54,7 +54,7 @@ namespace LocalDesktopNote
                 card.BeginEditing(card.TaskEditors[0]); Forms.Application.DoEvents();
                 card.TaskEditors[0].Text = "  "; card.NewTaskEditor.Focus(); Forms.Application.DoEvents();
                 Check(card.TaskEditors[0].Text == "整理今天的想法" && second.Text == "整理今天的想法", "blank title edit restores the previous valid title", report);
-                card.TaskEditors[0].Text = "  整理项目复盘  "; card.NewTaskEditor.Focus(); Forms.Application.DoEvents();
+                card.TaskEditors[0].Text = "  整理项目复盘  "; Check(card.FinishMemoHistory(), "explicit finish saves the renamed task", report); card.NewTaskEditor.Focus(); Forms.Application.DoEvents();
                 Check(second.Text.Trim() == "整理项目复盘", "renaming changes the same task rather than creating a duplicate", report);
                 card.NewTaskEditor.Text = "新增待办"; card.AddDraft(); Forms.Application.DoEvents();
                 var third = store.State.Tasks.Last();

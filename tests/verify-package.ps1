@@ -63,7 +63,9 @@ try {
         'icons/svg/ic_fluent_calendar_ltr_24_regular.svg','icons/svg/ic_fluent_checkbox_checked_24_regular.svg',
         'icons/svg/ic_fluent_dismiss_24_regular.svg','icons/svg/ic_fluent_history_24_regular.svg',
         'icons/svg/ic_fluent_image_multiple_24_regular.svg','icons/svg/ic_fluent_more_horizontal_24_regular.svg',
-        'icons/svg/ic_fluent_note_24_regular.svg','icons/svg/ic_fluent_settings_24_regular.svg'
+        'icons/svg/ic_fluent_note_24_regular.svg','icons/svg/ic_fluent_settings_24_regular.svg',
+        'icons/svg/ic_fluent_archive_24_regular.svg','icons/svg/ic_fluent_delete_24_regular.svg',
+        'illustrations/memo-bin.png','illustrations/memo-paper-corner.png','illustrations/memo-drop-arrow.png','illustrations/README.txt'
     )
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
@@ -77,7 +79,7 @@ try {
             Assert-Package (-not $seen.ContainsKey($relativeName)) ('archive entry is unique: ' + $relativeName)
             $seen[$relativeName] = $true
         }
-        Assert-Package ($seen.Count -eq $expectedFiles.Count) 'archive contains exactly 30 reviewed files and no user data or source files'
+        Assert-Package ($seen.Count -eq $expectedFiles.Count) 'archive contains exactly the reviewed files and no user data or source files'
     }
     finally { $archive.Dispose() }
     [IO.Compression.ZipFile]::ExtractToDirectory($ZipPath,$testRoot)
@@ -90,7 +92,7 @@ try {
         $resourceHashes[$relativeName] = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash
         if ($relativeName -eq 'Yourself Copilot.exe') { $sourcePath = Join-Path $projectRoot 'dist\Yourself-Copilot\Yourself Copilot.exe' }
         elseif ($relativeName -like '*.xaml') { $sourcePath = Join-Path $projectRoot ('src\' + $relativeName) }
-        elseif ($relativeName -like 'fonts/*' -or $relativeName -like 'icons/*') { $sourcePath = Join-Path $projectRoot ('assets\' + $relativeName) }
+        elseif ($relativeName -like 'fonts/*' -or $relativeName -like 'icons/*' -or $relativeName -like 'illustrations/*') { $sourcePath = Join-Path $projectRoot ('assets\' + $relativeName) }
         else { continue }
         Assert-Package ($resourceHashes[$relativeName] -eq (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash) ('packaged runtime/resource bytes match the reviewed build: ' + $relativeName)
     }

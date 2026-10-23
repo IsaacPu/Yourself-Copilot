@@ -9,7 +9,7 @@ New-Item -ItemType Directory -Path $snapshotPath -Force | Out-Null
 Get-ChildItem -LiteralPath $sourceDirectoryPath -Filter '*.cs' -File | Copy-Item -Destination $snapshotPath
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'MemoLayoutVerification.cs') -Destination $snapshotPath
 Copy-Item -LiteralPath (Join-Path $sourceDirectoryPath 'WorkboardView.xaml') -Destination $testPath
-foreach ($directory in @('fonts','icons')) {
+foreach ($directory in @('fonts','icons','illustrations')) {
     Copy-Item -LiteralPath (Join-Path $projectPath ('assets\' + $directory)) -Destination $testPath -Recurse
 }
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'

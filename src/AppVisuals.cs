@@ -20,9 +20,11 @@ namespace LocalDesktopNote
             { "tasks", "checkbox_checked" }, { "note", "note" }, { "history", "history" },
             { "settings", "settings" }, { "images", "image_multiple" }, { "plus", "add" },
             { "more", "more_horizontal" }, { "expand", "arrow_expand" },
-            { "calendar", "calendar_ltr" }, { "remove", "dismiss" }
+            { "calendar", "calendar_ltr" }, { "remove", "dismiss" },
+            { "archive", "archive" }, { "trash", "delete" }
         };
         private static readonly Dictionary<string, Geometry> Cache = new Dictionary<string, Geometry>(StringComparer.OrdinalIgnoreCase);
+        private static readonly Dictionary<string, ImageSource> IllustrationCache = new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
         private static readonly object BrandLock = new object();
         private static DrawingGroup brandDrawing;
         private static System.Drawing.Icon applicationIcon;
@@ -36,13 +38,31 @@ namespace LocalDesktopNote
         {
             { "tasks", "任务" }, { "note", "备忘" }, { "history", "历史" }, { "settings", "设置" },
             { "images", "图片" }, { "plus", "添加" }, { "more", "更多" }, { "expand", "展开" },
-            { "calendar", "日期" }, { "remove", "移除" }
+            { "calendar", "日期" }, { "remove", "移除" },
+            { "archive", "收起" }, { "trash", "纸篓" }
         };
 
         internal static ImageSource IconSource(string name, Brush foreground)
         {
             Geometry geometry = Load((name ?? "").Trim());
             return geometry == null ? null : new DrawingImage(new GeometryDrawing(foreground ?? SystemColors.ControlTextBrush, null, geometry));
+        }
+
+        internal static ImageSource IllustrationSource(string name)
+        {
+            if (String.IsNullOrEmpty(name) || System.IO.Path.GetFileName(name) != name) return null;
+            ImageSource cached;
+            if (IllustrationCache.TryGetValue(name, out cached)) return cached;
+            try
+            {
+                string path = System.IO.Path.Combine(Storage.Folder, "illustrations", name);
+                if (!File.Exists(path) || new FileInfo(path).Length > 8 * 1024 * 1024) return null;
+                var image = new BitmapImage(); image.BeginInit();
+                image.CacheOption = BitmapCacheOption.OnLoad; image.DecodePixelWidth = name == "memo-paper-corner.png" ? 640 : 320;
+                image.UriSource = new Uri(path, UriKind.Absolute);
+                image.EndInit(); image.Freeze(); IllustrationCache[name] = image; return image;
+            }
+            catch { return null; }
         }
 
         internal static FrameworkElement Icon(string name, double size, Brush foreground)

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Drawing;
@@ -350,8 +350,8 @@ namespace LocalDesktopNote
         protected override void ExitThreadCore()
         {
             if (exiting) return;
-            if (workbench != null && !workbench.Flush()) return;
-            if (workboard != null && !workboard.Flush()) { Message("工作卡尚未保存成功，退出已取消。请检查程序文件夹是否可写，或先复制当前内容。", true); return; }
+            if (workbench != null && !workbench.FinishMemoHistory()) return;
+            if (workboard != null && !workboard.FinishMemoHistory()) { Message("工作卡尚未保存成功，退出已取消。请检查程序文件夹是否可写，或先复制当前内容。", true); return; }
             if (workboardStore != null) workboardStore.CheckpointMemoHistory(true);
             if (!TrySave())
             {

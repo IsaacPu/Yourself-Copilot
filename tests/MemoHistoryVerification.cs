@@ -69,6 +69,17 @@ namespace LocalDesktopNote
             }
         }
 
+        private static void TaskDraftTypingIsNotHistory()
+        {
+            var f = new Fixture("task-draft-not-history", "固定随手记");
+            foreach (string text in new[] { "看", "看一下", "看一下郭昱hua", "看一下郭昱华" })
+            {
+                f.Advance(2); f.Store.State.TaskDraft = text; f.Store.Save();
+                Check(LibraryStore.Read<WorkboardState>(f.Store.PathName).TaskDraft == text, "unfinished task input remains recoverable in current data");
+                Check(f.Count == 0, "typing a task, including pinyin intermediate input, creates no history revision");
+            }
+        }
+
         private static void ContinuousAppendAndIdle()
         {
             var f = new Fixture("append-and-idle", "原有备忘");
@@ -78,6 +89,7 @@ namespace LocalDesktopNote
                 f.Advance(1); f.Store.State.Ideas += "字"; f.Store.Save();
                 Check(f.PersistedMemo == f.Store.State.Ideas, "autosave persists single-character append " + (index + 1));
             }
+            f.Store.State.Ideas += "。"; f.Store.Save();
             Check(f.Count == 1 && f.HasExact(before), "twenty consecutive appends retain one exact pre-edit version");
             byte[] current = f.CurrentBytes, backup = File.ReadAllBytes(f.Store.PathName + ".bak");
             f.Advance(29.999); Check(f.Store.CheckpointMemoHistory(), "checking before the idle boundary succeeds without forcing history");
@@ -87,6 +99,24 @@ namespace LocalDesktopNote
             Check(f.CurrentBytes.SequenceEqual(current) && File.ReadAllBytes(f.Store.PathName + ".bak").SequenceEqual(backup), "history checkpointing leaves primary data and the last autosave backup unchanged");
             f.Advance(60); f.Store.CheckpointMemoHistory(); f.Store.CheckpointMemoHistory(true);
             Check(f.Count == 2, "repeated idle and forced checks do not duplicate an already checkpointed version");
+        }
+
+        private static void SentenceAndParagraphVersions()
+        {
+            var f = new Fixture("sentence-and-paragraph", "已经保留的第一句话。");
+            foreach (string tail in new[] { "\n产品", "\n产品jing", "\n产品经理" })
+            {
+                f.Store.State.Ideas = "已经保留的第一句话。" + tail; f.Store.Save();
+                f.Advance(30); f.Store.CheckpointMemoHistory();
+                Check(f.Count == 1, "idle, newline and pinyin while drafting the next sentence do not create intermediate versions");
+            }
+            f.Store.State.Ideas += "需要理解业务。"; f.Store.Save(); f.Advance(30); f.Store.CheckpointMemoHistory();
+            Check(f.Count == 2 && f.HasExact(f.CurrentBytes), "finishing a new sentence creates one saved version");
+            f.Store.State.Ideas = f.Store.State.Ideas.Replace("理解", "了解"); f.Store.Save(); f.Advance(30); f.Store.CheckpointMemoHistory();
+            Check(f.Count == 2, "correcting a word in the same sentence does not become another idle revision");
+            f.Store.State.Ideas += "\n下一段记录新的观察\n"; f.Store.Save(); f.Advance(30); f.Store.CheckpointMemoHistory();
+            Check(f.Count == 3 && f.HasExact(f.CurrentBytes), "finishing a new paragraph preserves one complete paragraph revision");
+            Check(!History(f.Store).Any(path => f.Store.ReadHistorySnapshot(path).Ideas.Contains("jing")), "no pinyin input from the editing sequence entered the stored memo versions");
         }
 
         private static void ContinuousBackspace()
@@ -100,7 +130,9 @@ namespace LocalDesktopNote
             }
             Check(f.Count == 1 && f.HasExact(before), "twenty individual backspaces share one recovery baseline rather than twenty snapshots");
             f.Advance(30); f.Store.CheckpointMemoHistory();
-            Check(f.Count == 2 && f.HasMemo(new string('记', 80)), "the final result of ordinary backspacing becomes one idle checkpoint");
+            Check(f.Count == 1, "ordinary short backspacing does not create a new sentence or paragraph revision on idle");
+            f.Store.CheckpointMemoHistory(true);
+            Check(f.Count == 2 && f.HasMemo(new string('记', 80)), "leaving the editor still retains the persisted final backspace result for recovery");
         }
 
         private static void ContinuousFiveMinuteCheckpoint()
@@ -115,7 +147,7 @@ namespace LocalDesktopNote
             Check(f.Count == 1, "continuous edits at 299 seconds retain one baseline without an early periodic checkpoint");
             f.Advance(1); f.Store.State.Ideas += "界"; f.Store.Save();
             Check(f.Count == 2 && f.HasExact(f.CurrentBytes), "an autosave at five minutes retains the latest persisted version even without idle time");
-            f.Advance(10); f.Store.State.Ideas += "后"; f.Store.Save();
+            f.Advance(10); f.Store.State.Ideas += "后。"; f.Store.Save();
             Check(f.Count == 2, "editing after a periodic checkpoint does not duplicate its already archived baseline");
             f.Advance(30); f.Store.CheckpointMemoHistory();
             Check(f.Count == 3 && f.HasMemo(f.Store.State.Ideas), "the later final version still receives its own idle checkpoint");
@@ -235,23 +267,23 @@ namespace LocalDesktopNote
             var f = new Fixture("other-content", "固定随手记");
             byte[] previous = f.CurrentBytes;
             var task = f.Store.AddTask("任务原文"); f.Store.Save();
-            Check(f.Count == 1 && f.HasExact(previous), "task addition still retains its exact previous content version");
+            Check(f.Count == 2 && f.HasExact(previous) && f.HasExact(f.CurrentBytes), "task addition retains its recovery baseline and successfully saved new task");
             previous = f.CurrentBytes; task.Text = "任务新标题"; f.Store.Save();
-            Check(f.Count == 2 && f.HasExact(previous), "task-title changes remain individual content revisions");
+            Check(f.Count == 3 && f.HasExact(previous) && f.HasExact(f.CurrentBytes), "task-title saves retain the successfully saved revision");
             previous = f.CurrentBytes; f.Store.State.TaskDraft = "任务草稿"; f.Store.State.DraftPlanDate = "2026-10-23"; f.Store.Save();
-            Check(f.Count == 3 && f.HasExact(previous), "task draft content is not grouped by the memo-only policy");
+            Check(f.Count == 3, "task drafts autosave without creating a committed task revision");
             previous = f.CurrentBytes; f.Store.State.DraftPlanDate = "2026-10-24"; f.Store.Save();
-            Check(f.Count == 4 && f.HasExact(previous), "explicit draft-date changes keep their previous revision");
+            Check(f.Count == 3, "draft-date changes autosave without creating a task revision");
             previous = f.CurrentBytes; f.Store.SetPlanDate(task, new DateTime(2026, 10, 25)); f.Store.Save();
-            Check(f.Count == 5 && f.HasExact(previous), "task rescheduling keeps its previous revision");
+            Check(f.Count == 4 && History(f.Store).Any(path => f.Store.ReadHistorySnapshot(path).Tasks.Any(t => t.PlanDate == "2026-10-25")), "task rescheduling retains the successfully saved new plan date");
             previous = f.CurrentBytes; f.Store.SetCompleted(task, true); f.Store.Save();
-            Check(f.Count == 6 && f.HasExact(previous), "completion remains an individual previous-content snapshot");
+            Check(f.Count == 5 && History(f.Store).Any(path => f.Store.ReadHistorySnapshot(path).Tasks.Any(t => t.Done)), "task completion retains the successfully saved completed state");
             previous = f.CurrentBytes; f.Store.Remove(task); f.Store.Save();
-            Check(f.Count == 7 && f.HasExact(previous), "task removal remains an individual previous-content snapshot");
+            Check(f.Count == 6 && History(f.Store).Any(path => f.Store.ReadHistorySnapshot(path).Removed.Count == 1), "task removal retains the successfully saved removed state");
             previous = f.CurrentBytes; f.Store.Undo(); f.Store.Save();
-            Check(f.Count == 8 && f.HasExact(previous), "undo retains the preceding removed-task version");
+            Check(f.Count == 7 && History(f.Store).All(path => String.IsNullOrEmpty(f.Store.ReadHistorySnapshot(path).TaskDraft) && f.Store.ReadHistorySnapshot(path).DraftPlanDate == null), "undo retains task history without embedding unrelated unfinished task drafts");
             f.Advance(60); f.Store.CheckpointMemoHistory(true);
-            Check(f.Count == 8, "task-only revisions do not create a pending memo final checkpoint");
+            Check(f.Count == 7, "task-only revisions do not create a pending memo final checkpoint");
         }
 
         private static void SharedSaveAndViewChanges()
@@ -260,7 +292,7 @@ namespace LocalDesktopNote
             int cardSaved = 0, benchSaved = 0;
             f.Store.Saved += delegate { cardSaved++; };
             f.Store.Saved += delegate { benchSaved++; };
-            f.Store.State.Ideas += "编辑"; f.Store.NotifyChanged(); f.Store.Save();
+            f.Store.State.Ideas += "编辑。"; f.Store.NotifyChanged(); f.Store.Save();
             f.Store.Save();
             Check(cardSaved == 2 && benchSaved == 2 && f.Count == 1, "shared save acknowledgements can clear both window timers without duplicating memo history");
             f.Advance(29); f.Store.State.X += 10; f.Store.State.TaskScope = "all"; f.Store.Save();
@@ -285,7 +317,7 @@ namespace LocalDesktopNote
             Check(String.IsNullOrEmpty(baseline.Store.HistoryNotice), "a successful history retry clears the historical warning");
 
             var checkpoint = new Fixture("failed-final-checkpoint", "最终检查点基线");
-            checkpoint.Store.State.Ideas += "新内容"; checkpoint.Store.Save(); byte[] final = checkpoint.CurrentBytes;
+            checkpoint.Store.State.Ideas += "新内容。"; checkpoint.Store.Save(); byte[] final = checkpoint.CurrentBytes;
             checkpoint.Advance(30);
             using (var blocked = new BlockHistory(checkpoint))
             {
@@ -298,10 +330,25 @@ namespace LocalDesktopNote
             Check(checkpoint.Count == 2, "retrying an already recovered checkpoint is idempotent");
         }
 
+        private static void TaskHistoryFailureKeepsLatestCommit()
+        {
+            var f = new Fixture("failed-task-history", "固定备忘");
+            WorkTask task = f.Store.AddTask("第一个完整任务"); f.Store.Save();
+            using (var blocked = new BlockHistory(f))
+            {
+                task.Text = "第二个完整版本"; f.Store.Save();
+                task.Text = "第三个完整版本"; f.Store.Save();
+                Check(LibraryStore.Read<WorkboardState>(f.Store.PathName).Tasks.Single().Text == task.Text && !String.IsNullOrEmpty(f.Store.HistoryNotice), "task saves remain successful while their history storage is unavailable");
+            }
+            f.Store.CheckpointMemoHistory(true);
+            Check(History(f.Store).Any(path => f.Store.ReadHistorySnapshot(path).Tasks.Any(t => t.Text == "第三个完整版本")), "history retry retains the latest successfully saved task commit");
+            Check(String.IsNullOrEmpty(f.Store.HistoryNotice), "task history warning clears after both old and latest recovery candidates are retained");
+        }
+
         private static void PrimaryFailureRetainsPendingAndClock()
         {
             var f = new Fixture("failed-primary-clock", "主保存基线");
-            f.Store.State.Ideas += "成功编辑"; f.Store.Save();
+            f.Store.State.Ideas += "成功编辑。"; f.Store.Save();
             string successfulMemo = f.Store.State.Ideas;
             byte[] current = f.CurrentBytes, backup = File.ReadAllBytes(f.Store.PathName + ".bak");
             int saved = 0, changed = 0;
@@ -335,6 +382,8 @@ namespace LocalDesktopNote
         {
             try
             {
+                TaskDraftTypingIsNotHistory();
+                SentenceAndParagraphVersions(); TaskHistoryFailureKeepsLatestCommit();
                 ContinuousAppendAndIdle(); ContinuousBackspace(); ContinuousFiveMinuteCheckpoint(); ForceAndUnsavedInput(); ContinuousUnsavedMemoDeadline();
                 DestructiveChanges(); RestartDeduplication(); OtherContentKeepsHistory(); SharedSaveAndViewChanges();
                 HistoryFailureRetries(); PrimaryFailureRetainsPendingAndClock();

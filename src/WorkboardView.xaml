@@ -32,7 +32,7 @@
    <Border Grid.Row="1" Height="1" VerticalAlignment="Center" Background="#DDE2D7" IsHitTestVisible="False"/>
    <GridSplitter x:Name="MemoDivider" Grid.Row="1"/>
    <Border x:Name="MemoRegion" Grid.Row="2" Background="#FDFCF9" BorderBrush="#E2E3D9" BorderThickness="1" CornerRadius="9" Margin="0,0,0,5"><Grid Margin="12,6,10,6">
-    <Grid.RowDefinitions><RowDefinition Height="23"/><RowDefinition Height="*"/></Grid.RowDefinitions><DockPanel><Button x:Name="ExpandMemoButton" DockPanel.Dock="Right" Width="23" Height="23" Padding="4" ToolTip="在工作台展开随手记" AutomationProperties.Name="展开随手记"/><TextBlock Text="随手记" Foreground="#344438" FontSize="13" FontWeight="Medium" VerticalAlignment="Center"/></DockPanel>
+    <Grid.RowDefinitions><RowDefinition Height="23"/><RowDefinition Height="*"/></Grid.RowDefinitions><DockPanel><Button x:Name="ExpandMemoButton" DockPanel.Dock="Right" Width="23" Height="23" Padding="4" ToolTip="在工作台展开随手记" AutomationProperties.Name="展开随手记"/><ContentControl x:Name="MemoPaperActionsHost"/></DockPanel>
     <Grid Grid.Row="1"><TextBox x:Name="IdeasInput" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" IsReadOnly="True" AutomationProperties.Name="我的想法" ToolTip="点击这里写下想法；内容自动保存在本机"/><TextBlock x:Name="IdeasPlaceholder" Text="先记下来，慢慢整理…" Foreground="#949E8D" Margin="0,4,0,0" IsHitTestVisible="False"/></Grid>
    </Grid></Border>
    </Grid>

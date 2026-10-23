@@ -35,6 +35,7 @@ namespace LocalDesktopNote
         [DataMember(EmitDefaultValue = false)] public string DraftPlanDate;
         [DataMember(EmitDefaultValue = false)] public double? WorkbenchMemoTaskRatio;
         [DataMember(EmitDefaultValue = false)] public double? CardMemoTaskRatio;
+        [DataMember(EmitDefaultValue = false)] public List<MemoPaper> MemoPapers;
 
         [OnDeserializing]
         private void InitializeNewDefaults(StreamingContext context)
@@ -56,14 +57,16 @@ namespace LocalDesktopNote
         internal DateTime Today { get { return TodayProvider().Date; } }
         internal event EventHandler Changed;
         internal event EventHandler Saved;
+        internal event EventHandler MemoReplaced;
+        internal long MemoPaperGeneration { get; private set; }
         private bool preserveBackup;
         private bool notifying;
         private byte[] previousSavedBytes;
         private byte[] previousContentBytes;
         private byte[] previousOtherContentBytes, lastHistoryContentBytes;
         private byte[] pendingHistoryBytes, pendingHistoryContentBytes;
-        private string previousIdeas;
-        private bool memoHistoryPending;
+        private string previousIdeas, memoHistoryAnchor;
+        private bool memoHistoryPending, taskHistoryPending;
         private DateTime? unsavedMemoSinceUtc;
         private DateTime lastMemoEditUtc, memoCheckpointUtc, historyRetryUtc;
         private static readonly TimeSpan MemoIdle = TimeSpan.FromSeconds(30);
@@ -90,6 +93,7 @@ namespace LocalDesktopNote
             previousContentBytes = ContentBytes(State);
             previousOtherContentBytes = ContentBytes(State, false);
             previousIdeas = State.Ideas ?? "";
+            memoHistoryAnchor = previousIdeas;
             State.Ideas = State.Ideas ?? "";
             State.TaskDraft = State.TaskDraft ?? "";
             State.Tasks = State.Tasks ?? new List<WorkTask>();
@@ -227,7 +231,77 @@ namespace LocalDesktopNote
             State.Tasks.Insert(index, task); task.RemovedIndex = null; return task;
         }
 
+        internal MemoPaper StoreCurrentMemo(string kind, string expectedText = null, long? expectedGeneration = null)
+        {
+            if (kind != "archive" && kind != "trash")
+                throw new ArgumentException("请选择收起或回收随手记。", "kind");
+            string current = State.Ideas ?? "";
+            if ((expectedGeneration.HasValue && expectedGeneration.Value != MemoPaperGeneration) ||
+                (expectedText != null && !String.Equals(current, expectedText, StringComparison.Ordinal)))
+                throw new InvalidOperationException("随手记已发生变化，请按当前内容重新操作。");
+            if (String.IsNullOrWhiteSpace(current)) return null;
+            var paper = NewMemoPaper(current, kind);
+            ReplaceMemo("", paper);
+            return paper;
+        }
+
+        internal bool OpenMemoText(string text)
+        {
+            text = text ?? "";
+            string current = State.Ideas ?? "";
+            if (String.Equals(current, text, StringComparison.Ordinal)) return false;
+            ReplaceMemo(text, String.IsNullOrWhiteSpace(current) ? null : NewMemoPaper(current, "archive"));
+            return true;
+        }
+
+        private MemoPaper NewMemoPaper(string text, string kind)
+        {
+            return new MemoPaper { Id = Guid.NewGuid().ToString("N"), Text = text,
+                StoredAtUtc = UtcNowProvider().ToUniversalTime().ToString("o", CultureInfo.InvariantCulture), Kind = kind };
+        }
+
+        private void ReplaceMemo(string text, MemoPaper paper)
+        {
+            string previousText = State.Ideas;
+            List<MemoPaper> previousPapers = State.MemoPapers;
+            if (paper != null)
+            {
+                State.MemoPapers = previousPapers == null ? new List<MemoPaper>() : new List<MemoPaper>(previousPapers);
+                State.MemoPapers.Add(paper);
+            }
+            State.Ideas = text;
+            bool committed = false;
+            try
+            {
+                Save(delegate
+                {
+                    committed = true;
+                    // Even identical text taken back onto a new sheet invalidates
+                    // an older drag. Advance only with durable primary replacement.
+                    MemoPaperGeneration = unchecked(MemoPaperGeneration + 1);
+                });
+            }
+            catch
+            {
+                if (!committed)
+                {
+                    State.Ideas = previousText;
+                    State.MemoPapers = previousPapers;
+                    throw;
+                }
+                // A refresh failure after the atomic replacement cannot undo the
+                // persisted memo or make the UI retry an already completed action.
+                Notice = "内容已保存，部分界面未及时刷新；重新打开窗口后可查看。";
+            }
+            NotifyHandlers(MemoReplaced);
+        }
+
         internal void Save()
+        {
+            Save(null);
+        }
+
+        private void Save(Action committed)
         {
             byte[] bytes;
             using (var buffer = new MemoryStream())
@@ -238,9 +312,11 @@ namespace LocalDesktopNote
             byte[] contentBytes = ContentBytes(State);
             byte[] otherContentBytes = ContentBytes(State, false);
             DateTime now = UtcNowProvider();
+            string previousMemo = previousIdeas;
             bool memoChanged = previousIdeas != (State.Ideas ?? "");
+            bool hadSavedVersion = previousSavedBytes != null;
             bool otherContentChanged = !otherContentBytes.SequenceEqual(previousOtherContentBytes);
-            bool newMemoSession = !memoHistoryPending || now - lastMemoEditUtc >= MemoIdle;
+            bool newMemoSession = !memoHistoryPending;
             bool primaryExists = File.Exists(PathName);
             bool primaryMatchesSaved = primaryExists && previousSavedBytes != null && File.ReadAllBytes(PathName).SequenceEqual(previousSavedBytes);
             if (primaryExists && previousSavedBytes != null && !primaryMatchesSaved && !preserveBackup)
@@ -252,6 +328,7 @@ namespace LocalDesktopNote
             }
             if (!preserveBackup && primaryMatchesSaved && bytes.SequenceEqual(previousSavedBytes))
             {
+                if (committed != null) committed();
                 CheckpointMemoHistory();
                 NotifySaved();
                 NotifyChanged();
@@ -277,13 +354,17 @@ namespace LocalDesktopNote
                 unsavedMemoSinceUtc = null;
                 if (memoChanged)
                 {
-                    if (newMemoSession) memoCheckpointUtc = now;
+                    if (newMemoSession) { memoCheckpointUtc = now; memoHistoryAnchor = previousMemo; }
                     lastMemoEditUtc = now;
                     memoHistoryPending = true;
                 }
                 preserveBackup = false;
+                if (committed != null) committed();
             }
             finally { if (File.Exists(temporary)) try { File.Delete(temporary); } catch { } }
+            // A committed task change is visible in history only after primary
+            // persistence succeeds; autosaved task drafts never enter this path.
+            if (hadSavedVersion && otherContentChanged) taskHistoryPending = true;
             CheckpointMemoHistory();
             NotifySaved();
             NotifyChanged();
@@ -291,18 +372,28 @@ namespace LocalDesktopNote
 
         private void NotifySaved()
         {
-            var handler = Saved;
-            if (handler != null) handler(this, EventArgs.Empty);
+            NotifyHandlers(Saved);
+        }
+
+        private void NotifyHandlers(EventHandler handler)
+        {
+            if (handler == null) return;
+            foreach (EventHandler subscriber in handler.GetInvocationList())
+                try { subscriber(this, EventArgs.Empty); }
+                catch
+                {
+                    const string message = "部分界面未及时刷新；重新打开窗口后可查看。";
+                    if (String.IsNullOrEmpty(Notice)) Notice = message;
+                    else if (!Notice.Contains(message)) Notice += "\n" + message;
+                }
         }
 
         private static byte[] ContentBytes(WorkboardState state, bool includeIdeas = true)
         {
-            // History follows written content, task order and task state; window settings are not revisions.
+            // Drafts are autosaved for recovery, but are not committed task revisions.
             var content = new WorkboardState
             {
                 Ideas = includeIdeas ? state.Ideas ?? "" : "",
-                TaskDraft = state.TaskDraft ?? "",
-                DraftPlanDate = state.DraftPlanDate,
                 Tasks = state.Tasks ?? new List<WorkTask>(),
                 Removed = state.Removed ?? new List<WorkTask>()
             };
@@ -324,6 +415,30 @@ namespace LocalDesktopNote
             return removed >= 20 && removed >= before.Length * 0.3;
         }
 
+        internal static bool IsMeaningfulMemoRevision(string before, string after)
+        {
+            before = (before ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
+            after = (after ?? "").Replace("\r\n", "\n").Replace('\r', '\n');
+            if (before.Trim() == after.Trim()) return false;
+            if (RemovesSubstantialText(before, after)) return true;
+            int prefix = 0, suffix = 0;
+            while (prefix < before.Length && prefix < after.Length && before[prefix] == after[prefix]) prefix++;
+            while (suffix < before.Length - prefix && suffix < after.Length - prefix && before[before.Length - suffix - 1] == after[after.Length - suffix - 1]) suffix++;
+            string added = after.Substring(prefix, after.Length - prefix - suffix);
+            int changed = added.Count(c => !Char.IsWhiteSpace(c));
+            // A corrected character inside the same sentence is not another version.
+            // Punctuation/paragraph boundaries are local heuristics, not semantic AI.
+            if (changed >= 40) return true;
+            // Starting a new line is not finishing its still-unwritten paragraph.
+            if (after.EndsWith("\n", StringComparison.Ordinal) && added.IndexOf('\n') >= 0 && changed > 0) return true;
+            string tail = after.TrimEnd(' ', '\t', '\n', '”', '’', '"', '\'');
+            if (tail.Length == 0 || changed == 0) return false;
+            char last = tail[tail.Length - 1];
+            if ("。！？!?；;".IndexOf(last) >= 0 && added.IndexOf(last) >= 0) return true;
+            if (last == '.' && added.IndexOf('.') >= 0 && (tail.Length < 2 || !Char.IsDigit(tail[tail.Length - 2]))) return true;
+            return false;
+        }
+
         // Current content is saved independently. Only successfully persisted memo
         // versions can become checkpoints; a timer never promotes unsaved input.
         internal bool CheckpointMemoHistory(bool force = false)
@@ -331,11 +446,18 @@ namespace LocalDesktopNote
             DateTime now = UtcNowProvider();
             if (pendingHistoryBytes != null && (force || now >= historyRetryUtc))
                 if (!PreserveHistory(pendingHistoryBytes, pendingHistoryContentBytes, force)) return false;
+            if (taskHistoryPending)
+            {
+                if (!PreserveHistory(previousSavedBytes, previousContentBytes, force)) return false;
+                taskHistoryPending = false;
+            }
             if (!memoHistoryPending || previousSavedBytes == null) return true;
             if (!force && now - lastMemoEditUtc < MemoIdle && now - memoCheckpointUtc < MemoInterval) return true;
+            if (!force && now - memoCheckpointUtc < MemoInterval && !IsMeaningfulMemoRevision(memoHistoryAnchor, previousIdeas)) return true;
             if (!ContentBytes(State).SequenceEqual(previousContentBytes)) return true;
             if (!PreserveHistory(previousSavedBytes, previousContentBytes, force)) return false;
             memoHistoryPending = false;
+            memoHistoryAnchor = previousIdeas;
             memoCheckpointUtc = now;
             return true;
         }
@@ -362,6 +484,7 @@ namespace LocalDesktopNote
             string temporary = null;
             try
             {
+                bytes = HistoryPayload(bytes);
                 string folder = Path.Combine(HistoryFolder, Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
                 Directory.CreateDirectory(folder);
                 string path = Path.Combine(folder, UtcNowProvider().ToLocalTime().ToString("HHmmss", CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N") + ".json");
@@ -385,6 +508,24 @@ namespace LocalDesktopNote
             finally { if (temporary != null && File.Exists(temporary)) try { File.Delete(temporary); } catch { } }
         }
 
+        private static byte[] HistoryPayload(byte[] bytes)
+        {
+            WorkboardState snapshot;
+            using (var buffer = new MemoryStream(bytes))
+                snapshot = (WorkboardState)new DataContractJsonSerializer(typeof(WorkboardState)).ReadObject(buffer);
+            // The primary file owns stored papers. Repeating the entire paper
+            // collection in every recovery snapshot would grow quadratically.
+            if (snapshot.MemoPapers == null && String.IsNullOrEmpty(snapshot.TaskDraft) && snapshot.DraftPlanDate == null) return bytes;
+            snapshot.MemoPapers = null;
+            snapshot.TaskDraft = "";
+            snapshot.DraftPlanDate = null;
+            using (var buffer = new MemoryStream())
+            {
+                new DataContractJsonSerializer(typeof(WorkboardState)).WriteObject(buffer, snapshot);
+                return buffer.ToArray();
+            }
+        }
+
         internal WorkboardState ReadHistorySnapshot(string path)
         {
             string root = Path.GetFullPath(HistoryFolder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -401,8 +542,7 @@ namespace LocalDesktopNote
             try
             {
                 notifying = true;
-                var handler = Changed;
-                if (handler != null) handler(this, EventArgs.Empty);
+                NotifyHandlers(Changed);
             }
             finally { notifying = false; }
         }

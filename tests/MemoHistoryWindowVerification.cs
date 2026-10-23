@@ -115,7 +115,7 @@ namespace LocalDesktopNote
                 for (int index = 0; index < 20; index++)
                 {
                     bool card = index % 2 == 0;
-                    f.Advance(1); f.Editor(card).Text += "字";
+                    f.Advance(1); f.Editor(card).Text += index == 19 ? "字。" : "字";
                     Check(f.Store.State.Ideas == f.Editor(card).Text && f.Editor(!card).Text == f.Editor(card).Text,
                         "real TextChanged synchronizes the shared memo from " + (card ? "card" : "workbench") + " edit " + (index + 1));
                     Check(f.Flush(card) && f.PersistedMemo == f.Store.State.Ideas, "real Flush persists shared memo edit " + (index + 1));
@@ -139,7 +139,17 @@ namespace LocalDesktopNote
                 Check(f.Bench.Flush() && f.HistoryCount == 1, "navigation fixture starts with one persisted memo editing session");
                 f.Navigate("history");
                 Check(f.HistoryCount == 2 && f.HasMemo(f.PersistedMemo), "actual history navigation button finishes the memo session immediately");
-                Check(f.Bench.HistoryList.Items.Count == 2 && f.Bench.HistoryPreview.IsReadOnly && f.Bench.HistoryPreview.Text.Contains("随手记"), "history navigation renders both recovery versions through the actual human-readable read-only preview");
+                var historyPanel = Field<HistoryPanel>(f.Bench, "historyPanel");
+                Check(historyPanel.CurrentCategory == "memo" && historyPanel.CurrentFilter == "archive" && f.Bench.HistoryList.Items.Count == 0, "history navigation defaults to explicitly stored papers and leaves automatic recovery versions in their separate category");
+                historyPanel.SelectCategory("memo", "versions");
+                Check(f.Bench.HistoryList.Items.Count == 1 && f.Bench.HistoryPreview.IsReadOnly && historyPanel.Entries.Any(e => e.Text == f.Bench.HistoryPreview.Text) && f.HasMemo("已有随手记"), "history navigation coalesces short same-paragraph edits while preserving the original recovery file");
+                foreach (string version in new[] { f.PersistedMemo })
+                {
+                    int index = historyPanel.Entries.FindIndex(e => e.Text == version); f.Bench.HistoryList.SelectedIndex = index;
+                    Check(index >= 0 && f.Bench.HistoryPreview.IsReadOnly && f.Bench.HistoryPreview.Text == version, "each original and final recovery version can be selected as exact read-only memo text");
+                }
+                historyPanel.SelectCategory("task", "versions");
+                Check(f.Bench.HistoryList.Items.Count == 1 && f.Bench.HistoryPreview.IsReadOnly && f.Bench.HistoryPreview.Text.Contains("任务") && !f.Bench.HistoryPreview.Text.Contains("已有随手记") && !f.Bench.HistoryPreview.Text.Contains("导航前的最终内容") && historyPanel.RestoreButton.Visibility == Visibility.Collapsed, "task history merges memo-only changes into one read-only task state without memo text or overwrite action");
                 f.Navigate("history"); f.Navigate("memo"); f.Navigate("history");
                 Check(f.HistoryCount == 2, "repeated navigation and leaving an unchanged memo do not duplicate snapshots");
             }
@@ -233,7 +243,7 @@ namespace LocalDesktopNote
             {
                 using (var blocked = new BlockHistory(f))
                 {
-                    f.Card.IdeasEditor.Text += "历史目录暂时失败"; f.Card.Flush();
+                    f.Card.IdeasEditor.Text += "历史目录暂时失败。"; f.Card.Flush();
                     f.Card.RefreshHistoryStatus(); f.Bench.RefreshHistoryStatus();
                     Check(!String.IsNullOrEmpty(f.Store.HistoryNotice) && f.CardStatus.Contains("历史") && f.BenchStatus.Contains("历史"),
                         "real history-directory failure is visible in both clean window status areas");

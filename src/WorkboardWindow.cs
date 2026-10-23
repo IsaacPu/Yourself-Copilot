@@ -24,6 +24,7 @@ namespace LocalDesktopNote
         internal readonly Grid View;
         internal readonly TextBox IdeasEditor, NewTaskEditor;
         internal readonly List<TextBox> TaskEditors = new List<TextBox>();
+        private readonly HashSet<TextBox> editedTaskTitles = new HashSet<TextBox>();
         internal readonly List<CheckBox> TaskChecks = new List<CheckBox>();
         internal readonly List<CheckBox> CompletedChecks = new List<CheckBox>();
         internal readonly List<TextBlock> CompletedLabels = new List<TextBlock>();
@@ -36,6 +37,7 @@ namespace LocalDesktopNote
         private double roundedRadiusX, roundedRadiusY;
         private readonly Forms.Timer saveTimer;
         private readonly MemoSplitLayout memoSplit;
+        private readonly MemoPaperControls paperControls;
         private readonly StackPanel rows, completedRows;
         private readonly TextBlock status;
         private readonly ContextMenu menu;
@@ -107,6 +109,10 @@ namespace LocalDesktopNote
             Find<Button>("ExpandMemoButton").Click += delegate { EndEditing(); if (OpenMemo != null) OpenMemo(); else if (OpenWorkbench != null) OpenWorkbench(); };
             saveTimer = new Forms.Timer { Interval = 600 };
             saveTimer.Tick += delegate { saveTimer.Stop(); Flush(); };
+            paperControls = new MemoPaperControls(Store, Flush, delegate(string text, bool error) { status.Text = text; status.ToolTip = text; }, delegate { if (editing) { IdeasEditor.Focus(); Keyboard.Focus(IdeasEditor); } }, true);
+            Find<ContentControl>("MemoPaperActionsHost").Content = paperControls.View;
+            paperControls.PaperSurface = Find<Border>("MemoRegion");
+            paperControls.View.PreviewMouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e) { if (!editing) BeginEditing(e.OriginalSource as UIElement ?? paperControls.Grabber); };
             var memoDivider = Find<GridSplitter>("MemoDivider");
             memoDivider.PreviewMouseLeftButtonDown += delegate { if (!editing) BeginEditing(memoDivider); };
             memoSplit = new MemoSplitLayout(Find<Grid>("MemoSplitPanel"), Find<StackPanel>("TaskContents"), memoDivider, 136,
@@ -184,6 +190,7 @@ namespace LocalDesktopNote
                 if (contentSave) ShowSavedStatus();
             };
             Store.Saved += storeSaved;
+            Store.MemoReplaced += MemoReplaced;
             if (!String.IsNullOrEmpty(Store.Notice)) { status.Text = "已恢复 · 详情见提示"; status.ToolTip = Store.Notice; }
         }
 
@@ -495,6 +502,7 @@ namespace LocalDesktopNote
         }
         internal void AddDraft()
         {
+            CommitTaskTitles();
             // The model may be newer than this editor after a deferred refresh.
             if (NewTaskEditor.Text != Store.State.TaskDraft)
             {
@@ -512,9 +520,10 @@ namespace LocalDesktopNote
             BringTaskIntoView(task);
             if (editing) NewTaskEditor.Focus();
         }
-        internal void RemoveTask(WorkTask task) { Store.Remove(task); RenderTasks(); QueueSave(); }
+        internal void RemoveTask(WorkTask task) { CommitTaskTitles(); Store.Remove(task); RenderTasks(); QueueSave(); }
         internal void UndoRemoveTask()
         {
+            CommitTaskTitles();
             var restored = Store.Undo(); if (restored == null) return;
             if (restored.Done) Store.State.CompletedExpanded = true;
             if (!Store.SelectTasks(Store.State.TaskScope).Contains(restored))
@@ -531,8 +540,7 @@ namespace LocalDesktopNote
         internal void SetTaskCompleted(WorkTask task, bool done)
         {
             if (!Store.State.Tasks.Contains(task) || task.Done == done) return;
-            var editor = TaskEditors.FirstOrDefault(t => t.Tag == task);
-            if (editor != null) CommitTaskTitle(editor, task);
+            CommitTaskTitles();
             int oldIndex = TaskChecks.FindIndex(c => c.Tag == task);
             Store.SetCompleted(task, done); RenderTasks(); QueueSave();
             if (editing)
@@ -544,20 +552,24 @@ namespace LocalDesktopNote
         }
         private void CommitTaskTitle(TextBox input, WorkTask task)
         {
-            // TextChanged already owns actual edits. A stale mirror must not write back.
-            if (input.Text != task.Text)
-            {
-                bool wasLoading = loading; loading = true;
-                try { input.Text = task.Text; }
-                finally { loading = wasLoading; }
-                return;
-            }
             string value = input.Text.Trim();
-            if (value.Length == 0) input.Text = task.Text;
-            else if (input.Text != value) input.Text = value;
+            bool edited = editedTaskTitles.Remove(input);
+            bool changed = edited && value.Length > 0 && value != task.Text && Store.State.Tasks.Contains(task);
+            bool wasLoading = loading; loading = true;
+            try
+            {
+                // Only a local edit can submit a title; an old mirror refresh
+                // never promotes itself over a newer committed task.
+                if (changed) task.Text = value;
+                if (input.Text != task.Text) input.Text = task.Text;
+            }
+            finally { loading = wasLoading; }
+            if (changed) QueueSave();
         }
+        private void CommitTaskTitles() { foreach (var input in TaskEditors.ToArray()) CommitTaskTitle(input, (WorkTask)input.Tag); }
         internal void RenderTasks()
         {
+            if (editedTaskTitles.Count > 0) { pendingDayRefresh = true; return; }
             renderingTasks = true;
             rows.Children.Clear(); completedRows.Children.Clear(); TaskEditors.Clear(); TaskChecks.Clear(); CompletedChecks.Clear(); CompletedLabels.Clear();
             displayedDay = Store.Today;
@@ -607,18 +619,12 @@ namespace LocalDesktopNote
                     input.TextChanged += delegate
                     {
                         if (loading || renderingTasks) return;
-                        // Keep the last valid title while the user clears/retypes;
-                        // an empty edit must never become an invisible saved task.
-                        if (String.IsNullOrWhiteSpace(input.Text)) return;
-                        if (task.Text == input.Text) return;
-                        task.Text = input.Text;
-                        System.Windows.Automation.AutomationProperties.SetName(check, "完成任务：" + task.Text);
-                        System.Windows.Automation.AutomationProperties.SetName(remove, "任务操作：" + task.Text); QueueSave();
+                        editedTaskTitles.Add(input);
                     };
-                    input.LostKeyboardFocus += delegate { CommitTaskTitle(input, task); if (pendingDayRefresh && !disposing) input.Dispatcher.BeginInvoke(new Action(RenderTasks)); };
+                    input.LostKeyboardFocus += delegate { if (loading || renderingTasks) return; CommitTaskTitle(input, task); Flush(); if (pendingDayRefresh && !disposing) input.Dispatcher.BeginInvoke(new Action(RenderTasks)); };
                     input.PreviewKeyDown += delegate(object sender, KeyEventArgs e)
                     {
-                        if (e.Key == Key.Enter) { CommitTaskTitle(input, task); NewTaskEditor.Focus(); e.Handled = true; }
+                        if (e.Key == Key.Enter) { CommitTaskTitle(input, task); Flush(); NewTaskEditor.Focus(); e.Handled = true; }
                     };
                     Grid.SetColumn(input, 1); grid.Children.Add(input); rows.Children.Add(grid); TaskEditors.Add(input); TaskChecks.Add(check);
                 }
@@ -638,7 +644,8 @@ namespace LocalDesktopNote
         internal void SelectScope(string scope)
         {
             if (scope == Store.State.TaskScope || (scope != "today" && scope != "tomorrow" && scope != "later" && scope != "all")) return;
-            foreach (var input in TaskEditors) CommitTaskTitle(input, (WorkTask)input.Tag);
+            CommitTaskTitles();
+            if (dirty && !Flush()) return;
             Store.State.TaskScope = scope;
             UpdatePlaceholders(); RenderTasks(); QueueViewSave();
         }
@@ -678,6 +685,7 @@ namespace LocalDesktopNote
                 {
                     DateTime? date = choice == "later" ? (DateTime?)null : choice == "tomorrow" ? Store.Today.AddDays(1) : Store.Today;
                     if (task.PlanDate == WorkboardStore.FormatPlanDate(date)) return;
+                    CommitTaskTitles();
                     Store.SetPlanDate(task, date);
                     RenderTasks(); QueueSave();
                 };
@@ -706,6 +714,15 @@ namespace LocalDesktopNote
             finally { loading = false; }
             UpdatePlaceholders();
             if (TaskEditors.Any(t => t.IsKeyboardFocusWithin)) pendingDayRefresh = true; else RenderTasks();
+        }
+        private void MemoReplaced(object sender, EventArgs e)
+        {
+            if (disposing) return;
+            saveTimer.Stop(); loading = true;
+            try { IdeasEditor.Text = Store.State.Ideas ?? ""; }
+            finally { loading = false; }
+            dirty = viewDirty = saveFailed = false;
+            UpdatePlaceholders();
         }
         private void UpdateTaskCount()
         {
@@ -776,6 +793,7 @@ namespace LocalDesktopNote
         }
         internal bool FinishMemoHistory()
         {
+            CommitTaskTitles();
             if (!Flush()) return false;
             bool hadNotice = !String.IsNullOrEmpty(Store.HistoryNotice);
             if (!Store.CheckpointMemoHistory(true) || hadNotice) ShowSavedStatus();
@@ -795,7 +813,7 @@ namespace LocalDesktopNote
         {
             if (value && !disposing)
             {
-                FinishMemoHistory(); disposing = true; Store.Changed -= storeChanged; Store.Saved -= storeSaved; saveTimer.Dispose(); memoSplit.Dispose(); menu.IsOpen = false; if (taskPlanMenu != null) taskPlanMenu.IsOpen = false; host.Dispose();
+                FinishMemoHistory(); disposing = true; Store.Changed -= storeChanged; Store.Saved -= storeSaved; Store.MemoReplaced -= MemoReplaced; saveTimer.Dispose(); memoSplit.Dispose(); paperControls.Dispose(); menu.IsOpen = false; if (taskPlanMenu != null) taskPlanMenu.IsOpen = false; host.Dispose();
             }
             base.Dispose(value);
             if (value) Region = null;

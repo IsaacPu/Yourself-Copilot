@@ -88,7 +88,7 @@ namespace LocalDesktopNote
                 store.CheckpointMemoHistory(true);
                 store.State.Ideas = "修改后的备忘"; store.Save();
                 Check(History(store).Length == 1 && File.ReadAllBytes(store.PathName + ".bak").SequenceEqual(first), "changed save snapshots the previous contents and rotates the last backup");
-                Check(File.ReadAllBytes(History(store)[0]).SequenceEqual(first), "history retains exact prior persisted bytes");
+                Check(store.ReadHistorySnapshot(History(store)[0]).Ideas == "保留备忘" && store.ReadHistorySnapshot(History(store)[0]).TaskDraft == "", "history retains prior committed contents without the unfinished task draft");
                 var historic = store.ReadHistorySnapshot(History(store)[0]); historic.Ideas = "只读副本";
                 Check(store.State.Ideas == "修改后的备忘" && LibraryStore.Read<WorkboardState>(History(store)[0]).Ideas == "保留备忘", "reading a history snapshot is detached from live and archived data");
                 bool outsideRejected = false;
@@ -108,7 +108,7 @@ namespace LocalDesktopNote
                 Check(legacy.State.Tasks.Single().PlanDate == null && legacy.State.Tasks.Single().Id == "legacy-a" && legacy.State.Tasks.Single().Done, "legacy task remains unplanned with its completion and identity intact");
                 Check(legacy.SelectTasks("later").Count() == 1 && legacy.SelectTasks("today").Count() == 0, "legacy unplanned task stays visible in its correct section");
                 legacy.Save();
-                Check(History(legacy).Length == 1 && legacy.State.DraftPlanDate == WorkboardStore.FormatPlanDate(legacy.Today) && File.ReadAllText(legacy.PathName + ".bak").Contains("legacy memo"), "legacy draft-date migration retains the pre-upgrade backup and exact prior content revision");
+                Check(History(legacy).Length == 0 && legacy.State.DraftPlanDate == WorkboardStore.FormatPlanDate(legacy.Today) && File.ReadAllText(legacy.PathName + ".bak").Contains("legacy memo"), "legacy draft-date migration retains the pre-upgrade backup without inventing a committed history revision");
                 legacy.State.ShowCardOnStartup = false; legacy.State.TaskScope = "all"; legacy.Save();
                 var falseSetting = new WorkboardStore(Path.GetDirectoryName(legacyPath));
                 Check(!falseSetting.State.ShowCardOnStartup && falseSetting.State.TaskScope == "all", "explicit startup-off and scope preferences survive restart");
@@ -162,12 +162,12 @@ namespace LocalDesktopNote
                 contentOnly.State.CompletedExpanded = true; contentOnly.State.TaskScope = "all"; contentOnly.State.ShowCardOnStartup = false; contentOnly.Save();
                 Check(History(contentOnly).Length == 0 && LibraryStore.Read<WorkboardState>(contentOnly.PathName).X == 100, "geometry and display preferences save normally without creating content history");
                 contentOnly.State.TaskDraft = "新增草稿"; contentOnly.Save();
-                Check(History(contentOnly).Length == 1 && contentOnly.ReadHistorySnapshot(History(contentOnly)[0]).TaskDraft == "", "draft text changes create an exact previous-content revision");
+                Check(History(contentOnly).Length == 0 && LibraryStore.Read<WorkboardState>(contentOnly.PathName).TaskDraft == "新增草稿", "draft text autosaves for recovery without adding task history");
                 contentOnly.State.DraftPlanDate = "2026-10-21"; contentOnly.Save();
                 contentOnly.SetPlanDate(contentTask, contentOnly.Today.AddDays(1)); contentOnly.Save();
                 contentOnly.SetCompleted(contentTask, true); contentOnly.Save();
                 contentOnly.Remove(contentTask); contentOnly.Save(); contentOnly.Undo(); contentOnly.Save();
-                Check(History(contentOnly).Length == 6, "draft date, planned date, completion, removal and undo each retain prior content");
+                Check(History(contentOnly).Length == 5 && Directory.GetFiles(contentOnly.HistoryFolder, "*.json", SearchOption.AllDirectories).All(path => contentOnly.ReadHistorySnapshot(path).TaskDraft == ""), "committed task operations retain baseline and saved results while drafts never enter history");
                 Report.AppendLine("Assertions: " + assertions);
                 return 0;
             }
