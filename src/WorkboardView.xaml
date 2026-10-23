@@ -29,6 +29,7 @@
     <StackPanel x:Name="TaskRows"/>
     <Expander x:Name="CompletedGroup" Header="已完成" Foreground="#92978C" FontSize="11" Margin="0,8,0,4" Visibility="Collapsed" AutomationProperties.Name="已完成任务，展开或收起"><StackPanel x:Name="CompletedRows" Margin="0,5,0,0"/></Expander>
    </StackPanel></ScrollViewer>
+   <Border Grid.Row="1" Height="1" VerticalAlignment="Center" Background="#DDE2D7" IsHitTestVisible="False"/>
    <GridSplitter x:Name="MemoDivider" Grid.Row="1"/>
    <Border x:Name="MemoRegion" Grid.Row="2" Background="#FDFCF9" BorderBrush="#E2E3D9" BorderThickness="1" CornerRadius="9" Margin="0,0,0,5"><Grid Margin="12,6,10,6">
     <Grid.RowDefinitions><RowDefinition Height="23"/><RowDefinition Height="*"/></Grid.RowDefinitions><DockPanel><Button x:Name="ExpandMemoButton" DockPanel.Dock="Right" Width="23" Height="23" Padding="4" ToolTip="在工作台展开随手记" AutomationProperties.Name="展开随手记"/><TextBlock Text="随手记" Foreground="#344438" FontSize="13" FontWeight="Medium" VerticalAlignment="Center"/></DockPanel>

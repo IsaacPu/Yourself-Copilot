@@ -106,18 +106,154 @@ namespace LocalDesktopNote
             internal readonly WorkboardStore Store;
             internal readonly WorkboardWindow Card;
             internal readonly WorkbenchWindow Bench;
-            internal Fixture(string name, int activeTasks)
+            internal Fixture(string name, int activeTasks) : this(name, activeTasks, true) { }
+            internal Fixture(string name, int activeTasks, bool includeCompleted)
             {
                 Store = new WorkboardStore(Path.Combine(Storage.Folder, "fixtures", name));
                 Store.TodayProvider = delegate { return new DateTime(2026, 10, 22); };
                 Store.State.Ideas = ReferenceMemo;
-                var completed = Store.AddTask("吃饭", Store.Today); Store.SetCompleted(completed, true);
+                if (includeCompleted) { var completed = Store.AddTask("已处理的示例任务", Store.Today); Store.SetCompleted(completed, true); }
                 for (int i = 0; i < activeTasks; i++) Store.AddTask("今天第 " + (i + 1) + " 件需要处理的事：核对产品问题与具体工作", Store.Today);
                 Store.Save(); Store.CheckpointMemoHistory(true);
                 Card = new WorkboardWindow(Store); Bench = new WorkbenchWindow(Store);
             }
             internal int HistoryCount { get { return Directory.Exists(Store.HistoryFolder) ? Directory.GetFiles(Store.HistoryFolder, "*.json", SearchOption.AllDirectories).Length : 0; } }
             public void Dispose() { Card.Dispose(); Bench.Dispose(); }
+        }
+
+        private static ScrollViewer TaskScroll(TextBox editor)
+        {
+            Grid split = SplitGrid(editor);
+            FrameworkElement root = split.Children.OfType<FrameworkElement>().First(c => Grid.GetRow(c) == 0);
+            return root as ScrollViewer ?? Descendants<ScrollViewer>(root).First();
+        }
+
+        private static void FullyVisibleInTaskViewport(FrameworkElement item, TextBox editor, string name)
+        {
+            ScrollViewer scroll = TaskScroll(editor);
+            ScrollContentPresenter viewport = Descendants<ScrollContentPresenter>(scroll).First();
+            Rect itemBounds = Bounds(item, viewport);
+            FrameworkElement content = scroll.Content as FrameworkElement;
+            Check(item.Visibility == Visibility.Visible && item.ActualHeight > 0 && itemBounds.Top >= -1 && itemBounds.Bottom <= viewport.ActualHeight + 1,
+                name + " is fully visible inside task viewport: top=" + itemBounds.Top + "; bottom=" + itemBounds.Bottom + "; viewport=" + viewport.ActualHeight
+                + "; contentDesired=" + (content == null ? 0 : content.DesiredSize.Height) + "; extent=" + scroll.ExtentHeight + "; scrollViewport=" + scroll.ViewportHeight);
+        }
+
+        private static void ShortTaskViewportRegression()
+        {
+            using (var f = new Fixture("regression-empty-low-ratio", 0, false))
+            {
+                foreach (double? ratio in new double?[] { null, 0.001, 0.2 })
+                {
+                    f.Store.State.WorkbenchMemoTaskRatio = ratio;
+                    Field<MemoSplitLayout>(f.Bench, "memoSplit").Refresh();
+                    Layout(f.Bench.View, 1026, 800);
+                    FullyVisibleInTaskViewport(Field<TextBlock>(f.Bench, "taskEmpty"), f.Bench.IdeasEditor,
+                        "workbench 1026x800 ratio=" + (ratio.HasValue ? ratio.ToString() : "automatic") + " keeps the complete empty-state text visible");
+                }
+                Snapshot(f.Bench.View, "regression-empty-low-ratio.png");
+            }
+            using (var f = new Fixture("regression-one-completed", 0))
+            {
+                f.Bench.CompletedGroup.IsExpanded = true;
+                foreach (double? ratio in new double?[] { null, 0.001, 0.2 })
+                {
+                    f.Store.State.WorkbenchMemoTaskRatio = ratio;
+                    Field<MemoSplitLayout>(f.Bench, "memoSplit").Refresh();
+                    Layout(f.Bench.View, 1026, 800);
+                    string name = "workbench one completed task ratio=" + (ratio.HasValue ? ratio.ToString() : "automatic");
+                    FullyVisibleInTaskViewport(Field<TextBlock>(f.Bench, "taskEmpty"), f.Bench.IdeasEditor, name + " empty-state text");
+                    FullyVisibleInTaskViewport(f.Bench.CompletedGroup, f.Bench.IdeasEditor, name + " expanded completed group including its first complete row");
+                    Check(f.Bench.IdeasEditor.ActualHeight >= 100, name + " preserves a multiline memo viewport");
+                }
+                Snapshot(f.Bench.View, "regression-one-completed-low-ratio.png");
+                Layout(f.Bench.View, 1026, 740);
+                FullyVisibleInTaskViewport(f.Bench.CompletedGroup, f.Bench.IdeasEditor, "workbench 1026x740 expanded completed row");
+            }
+            using (var f = new Fixture("regression-active-and-completed", 1))
+            {
+                f.Bench.CompletedGroup.IsExpanded = true; f.Card.CompletedGroup.IsExpanded = true;
+                Layout(f.Bench.View, 1026, 800); Layout(f.Card.View, 529, 650);
+                FullyVisibleInTaskViewport((FrameworkElement)f.Bench.TaskChecks.Single().Parent, f.Bench.IdeasEditor, "automatic workbench complete active task row");
+                FullyVisibleInTaskViewport(f.Bench.CompletedGroup, f.Bench.IdeasEditor, "automatic workbench expanded completed group beside the active row");
+                FullyVisibleInTaskViewport((FrameworkElement)f.Card.TaskChecks.Single().Parent, f.Card.IdeasEditor, "automatic large card complete active task row");
+                FullyVisibleInTaskViewport(f.Card.CompletedGroup, f.Card.IdeasEditor, "automatic large card expanded completed group beside the active row");
+                Snapshot(f.Bench.View, "regression-active-and-completed-automatic.png");
+                foreach (double ratio in new[] { 0.001, 0.2 })
+                {
+                    f.Store.State.WorkbenchMemoTaskRatio = ratio;
+                    Field<MemoSplitLayout>(f.Bench, "memoSplit").Refresh(); Layout(f.Bench.View, 1026, 800);
+                    ScrollViewer scroll = TaskScroll(f.Bench.IdeasEditor); scroll.ScrollToTop(); f.Bench.View.UpdateLayout();
+                    FullyVisibleInTaskViewport((FrameworkElement)f.Bench.TaskChecks.Single().Parent, f.Bench.IdeasEditor,
+                        "workbench ratio=" + ratio + " retains the complete first active row");
+                    FullyVisibleInTaskViewport(f.Bench.CompletedGroup, f.Bench.IdeasEditor,
+                        "workbench short mixed list ratio=" + ratio + " shows the complete expanded completed group including its date without scrolling");
+                    scroll.ScrollToBottom(); f.Bench.View.UpdateLayout();
+                    FullyVisibleInTaskViewport((FrameworkElement)f.Bench.CompletedChecks.Single().Parent, f.Bench.IdeasEditor,
+                        "workbench ratio=" + ratio + " can reach the complete completed row by task scrolling");
+                }
+                Snapshot(f.Bench.View, "regression-active-and-completed-low-ratio.png");
+            }
+        }
+
+        private static void DividerFocusRegression()
+        {
+            using (var f = new Fixture("regression-divider-focus", 0))
+            {
+                Layout(f.Bench.View, 1026, 800); Layout(f.Card.View, 529, 500);
+                foreach (bool card in new[] { false, true })
+                {
+                    Grid split = SplitGrid(card ? f.Card.IdeasEditor : f.Bench.IdeasEditor);
+                    GridSplitter divider = split.Children.OfType<GridSplitter>().Single();
+                    string name = card ? "card" : "workbench";
+                    Check(divider.Focusable, name + " divider remains keyboard accessible");
+                    Check(divider.FocusVisualStyle == null, name + " divider suppresses the default full-width dotted focus adorner");
+                    var focusTargets = divider.Template.Triggers.OfType<Trigger>()
+                        .Where(t => t.Property == UIElement.IsKeyboardFocusedProperty || t.Property == UIElement.IsKeyboardFocusWithinProperty)
+                        .SelectMany(t => t.Setters.OfType<Setter>())
+                        .Select(s => String.IsNullOrEmpty(s.TargetName) ? null : divider.Template.FindName(s.TargetName, divider) as FrameworkElement)
+                        .ToArray();
+                    Check(focusTargets.Length > 0 && focusTargets.All(t => t != null && t.ActualWidth > 0 && t.ActualWidth <= 64 && t.ActualWidth < split.ActualWidth / 2),
+                        name + " keyboard focus feedback is confined to the small drag grip");
+                    Check(divider.Cursor == Cursors.Hand, name + " grip uses the hand cursor");
+                    Check(divider.ActualWidth <= 64 && divider.ActualHeight <= 22, name + " only the small grip is an interactive resize target");
+                    Rect gripBounds = Bounds(divider, split);
+                    var centerResult = VisualTreeHelper.HitTest(split, new Point(gripBounds.Left + gripBounds.Width / 2, gripBounds.Top + gripBounds.Height / 2));
+                    var lineResult = VisualTreeHelper.HitTest(split, new Point(5, gripBounds.Top + gripBounds.Height / 2));
+                    DependencyObject centerHit = centerResult == null ? null : centerResult.VisualHit;
+                    DependencyObject lineHit = lineResult == null ? null : lineResult.VisualHit;
+                    Check(centerHit != null && (centerHit == divider || divider.IsAncestorOf(centerHit)), name + " grip center receives drag input");
+                    Check(lineHit == null || (lineHit != divider && !divider.IsAncestorOf(lineHit)), name + " separator outside the grip does not receive drag input");
+                }
+            }
+        }
+
+        private static void LowRatioIndependentScrollRegression()
+        {
+            using (var f = new Fixture("regression-low-ratio-independent-scroll", 24))
+            {
+                f.Bench.CompletedGroup.IsExpanded = true;
+                f.Bench.IdeasEditor.Text = String.Join("\r\n", Enumerable.Range(1, 100).Select(i => "示例随手记第 " + i + " 行：用于验证独立滚动。"));
+                f.Bench.Flush();
+                f.Store.State.WorkbenchMemoTaskRatio = 0.001;
+                Field<MemoSplitLayout>(f.Bench, "memoSplit").Refresh(); Layout(f.Bench.View, 1026, 800);
+                ScrollViewer scroll = TaskScroll(f.Bench.IdeasEditor);
+                FullyVisibleInTaskViewport((FrameworkElement)f.Bench.TaskChecks.First().Parent, f.Bench.IdeasEditor,
+                    "long task list under low ratio keeps the first active row usable");
+                Check(scroll.ScrollableHeight > 0 && f.Bench.IdeasEditor.ExtentHeight > f.Bench.IdeasEditor.ViewportHeight,
+                    "low persisted ratio retains separate overflow viewports for task list and memo");
+                double memoOffset = f.Bench.IdeasEditor.VerticalOffset;
+                scroll.ScrollToBottom(); f.Bench.View.UpdateLayout();
+                FullyVisibleInTaskViewport((FrameworkElement)f.Bench.CompletedChecks.Single().Parent, f.Bench.IdeasEditor,
+                    "long task list under low ratio can scroll to a complete completed row");
+                Check(scroll.VerticalOffset > 0 && f.Bench.IdeasEditor.VerticalOffset == memoOffset,
+                    "low-ratio task scrolling leaves memo position unchanged");
+                double taskOffset = scroll.VerticalOffset;
+                f.Bench.IdeasEditor.ScrollToEnd(); f.Bench.View.UpdateLayout();
+                Check(taskOffset == scroll.VerticalOffset && f.Bench.IdeasEditor.VerticalOffset > 0,
+                    "low-ratio memo scrolling leaves task position unchanged");
+                Snapshot(f.Bench.View, "regression-low-ratio-independent-scroll.png");
+            }
         }
 
         private static void EmptyLayouts()
@@ -190,18 +326,18 @@ namespace LocalDesktopNote
                 int history = f.HistoryCount;
                 var contentMethod = typeof(WorkboardStore).GetMethod("ContentBytes", BindingFlags.Static | BindingFlags.NonPublic);
                 byte[] contentBefore = (byte[])contentMethod.Invoke(null, new object[] { f.Store.State, true });
-                f.Store.State.WorkbenchMemoTaskRatio = 0.35; f.Store.State.CardMemoTaskRatio = 0.4;
+                f.Store.State.WorkbenchMemoTaskRatio = 0.5; f.Store.State.CardMemoTaskRatio = 0.4;
                 Field<MemoSplitLayout>(f.Bench, "memoSplit").Refresh(); Field<MemoSplitLayout>(f.Card, "memoSplit").Refresh();
                 Layout(f.Bench.View, 1026, 800); Layout(f.Card.View, 529, 400); f.Store.Save();
                 var reopened = new WorkboardStore(Path.GetDirectoryName(f.Store.PathName));
-                Check(reopened.State.WorkbenchMemoTaskRatio == 0.35 && reopened.State.CardMemoTaskRatio == 0.4, "independent workbench/card split ratios survive Store.Save and reopening");
+                Check(reopened.State.WorkbenchMemoTaskRatio == 0.5 && reopened.State.CardMemoTaskRatio == 0.4, "independent workbench/card split ratios survive Store.Save and reopening");
                 Check(f.HistoryCount == history, "changing only split preferences creates no history entries");
                 byte[] contentAfter = (byte[])contentMethod.Invoke(null, new object[] { f.Store.State, true });
                 Check(contentBefore.SequenceEqual(contentAfter), "split ratios are excluded from history ContentBytes equality");
                 Check(!Field<bool>(f.Bench, "dirty") && !Field<bool>(f.Card, "dirty"), "ratio refresh alone does not mark either memo's content dirty");
                 Grid bs = SplitGrid(f.Bench.IdeasEditor), cs = SplitGrid(f.Card.IdeasEditor);
                 double br = bs.RowDefinitions[0].ActualHeight / (bs.RowDefinitions[0].ActualHeight + bs.RowDefinitions[2].ActualHeight);
-                Check(Math.Abs(br - 0.35) < 0.03, "workbench persisted ratio controls actual measured split");
+                Check(Math.Abs(br - 0.5) < 0.03, "workbench persisted ratio inside usable bounds controls actual measured split");
                 Check(cs.RowDefinitions[0].ActualHeight > 0 && cs.RowDefinitions[2].ActualHeight > 0, "card persisted ratio is constrained to keep both areas visible");
             }
         }
@@ -296,6 +432,10 @@ namespace LocalDesktopNote
                     // before routed input so that no Show/activation is invoked.
                     if (card) typeof(WorkboardWindow).GetField("editing", BindingFlags.Instance | BindingFlags.NonPublic).SetValue(f.Card, true);
                     Grid view = card ? f.Card.View : f.Bench.View; TextBox editor = card ? f.Card.IdeasEditor : f.Bench.IdeasEditor;
+                    // Start inside the usable range. Automatic allocation can
+                    // already sit at the task-content safety minimum.
+                    if (card) f.Store.State.CardMemoTaskRatio = 0.55; else f.Store.State.WorkbenchMemoTaskRatio = 0.55;
+                    Field<MemoSplitLayout>(card ? (object)f.Card : f.Bench, "memoSplit").Refresh();
                     Layout(view, card ? 529 : 1026, card ? 500 : 800);
                     Grid split = SplitGrid(editor); GridSplitter divider = split.Children.OfType<GridSplitter>().Single();
                     int history = f.HistoryCount; double before = split.RowDefinitions[0].ActualHeight;
@@ -327,6 +467,14 @@ namespace LocalDesktopNote
                     ratio = card ? f.Store.State.CardMemoTaskRatio : f.Store.State.WorkbenchMemoTaskRatio;
                     Check(ratio.HasValue && split.RowDefinitions[0].ActualHeight < before, (card ? "card" : "workbench") + " routed Up key adjusts split and stores view preference");
                     Check(f.HistoryCount == history, (card ? "card" : "workbench") + " routed keyboard adjustment creates no history snapshot");
+                    for (int i = 0; i < 30; i++)
+                        divider.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice, inputSource, Environment.TickCount, Key.Up) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+                    Layout(view, card ? 529 : 1026, card ? 500 : 800);
+                    Check((card ? f.Store.State.CardMemoTaskRatio : f.Store.State.WorkbenchMemoTaskRatio).HasValue,
+                        (card ? "card" : "workbench") + " repeated keyboard shrink persists a bounded preference");
+                    FullyVisibleInTaskViewport((FrameworkElement)(card ? f.Card.TaskChecks.First().Parent : f.Bench.TaskChecks.First().Parent), editor,
+                        (card ? "card" : "workbench") + " repeated keyboard shrink cannot clip the first task row");
+                    Check(f.HistoryCount == history, (card ? "card" : "workbench") + " repeated keyboard clamping creates no history snapshot");
                     Inside(editor, view, (card ? "card" : "workbench") + " memo after routed drag/reset");
                     Check(!f.Card.Visible && !f.Card.Attached && !f.Bench.Visible, "routed " + (card ? "card" : "workbench") + " gestures keep both native windows hidden and desktop-unattached");
                 }
@@ -346,6 +494,9 @@ namespace LocalDesktopNote
                 Run("invalid and extreme ratios", ExtremeRatios);
                 Run("single editor page ownership", NavigationKeepsOneEditor);
                 Run("routed splitter gestures", SplitterRoutedGestures);
+                Run("short task viewport regression", ShortTaskViewportRegression);
+                Run("divider focus regression", DividerFocusRegression);
+                Run("low-ratio independent scrolling regression", LowRatioIndependentScrollRegression);
                 Report.AppendLine("Passed: " + passed + "; Failed: " + failed);
                 Report.AppendLine("LIMIT: WPF views explicitly measured/arranged and rendered while hidden. Thumb completion uses controlled row-size changes; Mouse/Key events exercise production routes using a test PresentationSource, without native drag capture. No physical pointer/keyboard input, native foreground focus, real desktop attachment, production files, registry, or application processes were used.");
                 return failed == 0 ? 0 : 1;

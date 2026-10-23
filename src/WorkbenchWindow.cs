@@ -156,6 +156,8 @@ namespace LocalDesktopNote
             AutomationProperties.SetName(CompletedGroup, "工作台已完成任务，展开或收起"); list.Children.Add(CompletedGroup);
             var scroll = new ScrollViewer { Content = list, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, 6, 0) };
             splitGrid.Children.Add(scroll);
+            var splitLine = new Border { Height = 1, Background = Brush("#DDE2D7"), VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+            Grid.SetRow(splitLine, 1); splitGrid.Children.Add(splitLine);
             var divider = MemoSplitLayout.CreateDivider(); Grid.SetRow(divider, 1); splitGrid.Children.Add(divider);
 
             var memoCard = new Grid(); memoCard.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); memoCard.RowDefinitions.Add(new RowDefinition());

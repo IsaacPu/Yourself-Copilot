@@ -38,16 +38,16 @@ namespace LocalDesktopNote
 
         private static void ConfigureDivider(GridSplitter value)
         {
-            value.Height = 28; value.HorizontalAlignment = HorizontalAlignment.Stretch;
-            value.VerticalAlignment = VerticalAlignment.Stretch; value.Focusable = true;
+            value.Width = 64; value.Height = 22; value.HorizontalAlignment = HorizontalAlignment.Center;
+            value.VerticalAlignment = VerticalAlignment.Center; value.Focusable = true;
+            // The template draws keyboard focus on the grip. The default WPF
+            // focus adorner otherwise outlines the entire full-width hit area.
+            value.FocusVisualStyle = null;
             value.ResizeDirection = GridResizeDirection.Rows; value.ResizeBehavior = GridResizeBehavior.PreviousAndNext;
-            value.Cursor = Cursors.SizeNS; value.Background = Brushes.Transparent; value.ShowsPreview = false;
-            value.ToolTip = "拖动调整任务与随手记的高度；上下方向键微调，双击恢复自动分配。";
+            value.Cursor = Cursors.Hand; value.Background = Brushes.Transparent; value.ShowsPreview = false;
+            value.ToolTip = "抓住手柄调整高度；上下方向键微调，双击恢复自动分配。";
             System.Windows.Automation.AutomationProperties.SetName(value, "调整任务与随手记高度");
             var root = new FrameworkElementFactory(typeof(Grid)); root.SetValue(Panel.BackgroundProperty, Brushes.Transparent);
-            var line = new FrameworkElementFactory(typeof(Border));
-            line.SetValue(FrameworkElement.HeightProperty, 1.0); line.SetValue(FrameworkElement.VerticalAlignmentProperty, VerticalAlignment.Center);
-            line.SetValue(Border.BackgroundProperty, new SolidColorBrush(Color.FromRgb(221, 226, 215))); root.AppendChild(line);
             var grip = new FrameworkElementFactory(typeof(Border), "Grip");
             grip.SetValue(FrameworkElement.WidthProperty, 64.0); grip.SetValue(FrameworkElement.HeightProperty, 22.0);
             grip.SetValue(Border.CornerRadiusProperty, new CornerRadius(10));
@@ -71,10 +71,25 @@ namespace LocalDesktopNote
         private void SizeChanged(object sender, SizeChangedEventArgs e) { Refresh(); }
         private double Available { get { return Math.Max(0, panel.ActualHeight - panel.RowDefinitions[1].ActualHeight); } }
 
+        private double NaturalTaskHeight()
+        {
+            double natural = taskContent.DesiredSize.Height;
+            var parent = taskContent.Parent as FrameworkElement;
+            if (parent != null) natural += parent.Margin.Top + parent.Margin.Bottom;
+            var scroll = parent as ScrollViewer;
+            if (scroll != null) natural += scroll.Padding.Top + scroll.Padding.Bottom;
+            return natural + 8;
+        }
         private double TaskHeight(double desired)
         {
             double available = Available;
-            double minimum = Math.Min(48, available * 0.22);
+            // A saved ratio is a preference, not permission to cut an empty
+            // state or the first task into a narrow strip. Short lists keep
+            // their natural height; longer lists retain a readable viewport.
+            double natural = NaturalTaskHeight();
+            double minimum = natural + memoMinimum <= available ? natural : Math.Min(natural, memoMinimum);
+            if (minimum + memoMinimum > available) minimum = Math.Min(minimum, available * 0.4);
+            minimum = Math.Max(Math.Min(48, available * 0.22), minimum);
             double memo = Math.Min(memoMinimum, available - minimum);
             return Math.Max(minimum, Math.Min(available - memo, desired));
         }
@@ -102,13 +117,12 @@ namespace LocalDesktopNote
             try
             {
                 double available = Available; double? ratio = readRatio();
-                double natural = taskContent.DesiredSize.Height;
+                double natural = NaturalTaskHeight();
                 if (natural <= 0) natural = available * 0.35;
-                var parent = taskContent.Parent as FrameworkElement;
-                if (parent != null) natural += parent.Margin.Top + parent.Margin.Bottom;
-                var scroll = parent as ScrollViewer;
-                if (scroll != null) natural += scroll.Padding.Top + scroll.Padding.Bottom;
-                double height = TaskHeight(Valid(ratio) ? available * ratio.Value : Math.Min(natural + 8, available * 0.45));
+                // Show a short list in full when both sections can fit. Only
+                // overflowing lists use the proportional automatic allocation.
+                double automatic = natural <= TaskHeight(available) ? natural : available * 0.45;
+                double height = TaskHeight(Valid(ratio) ? available * ratio.Value : automatic);
                 // Persistent MinHeight values feed back into the parent Grid's
                 // Measure and can keep a once-large card from shrinking. Clamp the
                 // weights instead; use native row minima only during a drag.
@@ -128,7 +142,7 @@ namespace LocalDesktopNote
         private void DragStarted(object sender, DragStartedEventArgs e)
         {
             dragging = true;
-            panel.RowDefinitions[0].MinHeight = Math.Min(48, Available * 0.22);
+            panel.RowDefinitions[0].MinHeight = TaskHeight(0);
             panel.RowDefinitions[2].MinHeight = Math.Min(memoMinimum, Available - panel.RowDefinitions[0].MinHeight);
         }
         private void ClearDragMinimums()
