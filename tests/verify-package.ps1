@@ -65,7 +65,7 @@ try {
         'icons/svg/ic_fluent_image_multiple_24_regular.svg','icons/svg/ic_fluent_more_horizontal_24_regular.svg',
         'icons/svg/ic_fluent_note_24_regular.svg','icons/svg/ic_fluent_settings_24_regular.svg',
         'icons/svg/ic_fluent_archive_24_regular.svg','icons/svg/ic_fluent_delete_24_regular.svg',
-        'illustrations/memo-bin.png','illustrations/memo-paper-corner.png','illustrations/memo-drop-arrow.png','illustrations/README.txt'
+        'illustrations/memo-bin.png','illustrations/memo-bin-filled.png','illustrations/memo-paper-corner.png','illustrations/memo-drop-arrow.png','illustrations/README.txt'
     )
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)

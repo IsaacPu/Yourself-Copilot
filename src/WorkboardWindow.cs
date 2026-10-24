@@ -112,6 +112,7 @@ namespace LocalDesktopNote
             paperControls = new MemoPaperControls(Store, Flush, delegate(string text, bool error) { status.Text = text; status.ToolTip = text; }, delegate { if (editing) { IdeasEditor.Focus(); Keyboard.Focus(IdeasEditor); } }, true);
             Find<ContentControl>("MemoPaperActionsHost").Content = paperControls.View;
             paperControls.PaperSurface = Find<Border>("MemoRegion");
+            paperControls.AttachDragHost(View);
             paperControls.View.PreviewMouseLeftButtonDown += delegate(object sender, MouseButtonEventArgs e) { if (!editing) BeginEditing(e.OriginalSource as UIElement ?? paperControls.Grabber); };
             var memoDivider = Find<GridSplitter>("MemoDivider");
             memoDivider.PreviewMouseLeftButtonDown += delegate { if (!editing) BeginEditing(memoDivider); };
@@ -161,11 +162,14 @@ namespace LocalDesktopNote
             BindCorner(ResizeCorner.BottomRight, HorizontalAlignment.Right, VerticalAlignment.Bottom, Cursors.SizeNWSE, "右下角缩放");
             View.PreviewKeyDown += delegate(object sender, KeyEventArgs e)
             {
+                if (e.Key == Key.Escape) paperControls.CancelPaperLift();
+                if (paperControls.HandleHistoryKey(e.Key, Keyboard.Modifiers, IdeasEditor.IsKeyboardFocusWithin ? IdeasEditor : null, IdeasEditor.IsKeyboardFocusWithin || paperControls.View.IsKeyboardFocusWithin)) { e.Handled = true; return; }
                 if (e.Key == Key.Escape && editing) { EndEditing(); e.Handled = true; }
                 if (e.Key == Key.S && (Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0) { FinishMemoHistory(); e.Handled = true; }
             };
             Deactivate += delegate
             {
+                paperControls.CancelPaperLift();
                 if (!ReturnToDesktopOnDeactivate || transitioning || disposing || !editing) return;
                 BeginInvoke(new Action(delegate { if (!disposing && editing && !ContainsFocus && !menu.IsOpen && (taskPlanMenu == null || !taskPlanMenu.IsOpen)) EndEditing(); }));
             };
@@ -301,6 +305,7 @@ namespace LocalDesktopNote
 
         internal void EndEditing()
         {
+            paperControls.CancelPaperLift();
             if (!editing) return;
             foreach (var input in TaskEditors) CommitTaskTitle(input, (WorkTask)input.Tag);
             if (!FinishMemoHistory()) return;
@@ -708,7 +713,7 @@ namespace LocalDesktopNote
             loading = true;
             try
             {
-                if (!IdeasEditor.IsKeyboardFocusWithin && IdeasEditor.Text != Store.State.Ideas) IdeasEditor.Text = Store.State.Ideas;
+                if (!IdeasEditor.IsKeyboardFocusWithin && IdeasEditor.Text != Store.State.Ideas) MemoPaperControls.ReplaceEditorText(IdeasEditor, Store.State.Ideas);
                 if (!NewTaskEditor.IsKeyboardFocusWithin && NewTaskEditor.Text != Store.State.TaskDraft) NewTaskEditor.Text = Store.State.TaskDraft;
             }
             finally { loading = false; }
@@ -719,7 +724,7 @@ namespace LocalDesktopNote
         {
             if (disposing) return;
             saveTimer.Stop(); loading = true;
-            try { IdeasEditor.Text = Store.State.Ideas ?? ""; }
+            try { MemoPaperControls.ReplaceEditorText(IdeasEditor, Store.State.Ideas); }
             finally { loading = false; }
             dirty = viewDirty = saveFailed = false;
             UpdatePlaceholders();

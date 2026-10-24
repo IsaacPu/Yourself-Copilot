@@ -182,21 +182,20 @@ namespace LocalDesktopNote
             memo.RowDefinitions.Add(new RowDefinition()); memo.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             IdeasEditor = new TextBox { FontFamily = AppTypography.Memo, FontSize = 16, AcceptsReturn = true, AcceptsTab = true, TextWrapping = TextWrapping.Wrap, Background = Brushes.Transparent, BorderThickness = new Thickness(0), VerticalScrollBarVisibility = ScrollBarVisibility.Auto, VerticalContentAlignment = VerticalAlignment.Top, Padding = new Thickness(0, 2, 0, 0), ToolTip = "自动保存在本机。转为任务时保留原备忘；一次最多 240 字。" };
             AutomationProperties.SetName(IdeasEditor, "工作台随手记");
-            var fullPaper = new Grid(); fullPaper.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); fullPaper.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); fullPaper.RowDefinitions.Add(new RowDefinition());
+            var fullPaper = new Grid(); fullPaper.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); fullPaper.RowDefinitions.Add(new RowDefinition());
             fullPaperControls = new MemoPaperControls(Store, Flush, ShowStatus, FocusMemoEditor, false);
             fullPaperControls.View.Children.Remove(fullPaperControls.Grabber);
             ((Panel)fullPaperControls.Bin.Parent).Children.Remove(fullPaperControls.Bin);
-            fullPaperControls.View.Margin = new Thickness(0, 0, 0, 20); fullPaper.Children.Add(fullPaperControls.View);
-            var paperIntro = new TextBlock { Text = "把念头先放在这里", FontFamily = AppTypography.Body, FontSize = 28, FontWeight = FontWeights.Normal, Margin = new Thickness(4, 0, 0, 20), TextWrapping = TextWrapping.Wrap };
-            Grid.SetRow(paperIntro, 1); fullPaper.Children.Add(paperIntro);
-            fullMemoHost = new Border { Background = Brushes.Transparent, Margin = new Thickness(4, 0, 6, 42) }; Grid.SetRow(fullMemoHost, 2); fullPaper.Children.Add(fullMemoHost);
+            fullPaperControls.View.Margin = new Thickness(0, 0, 0, 24); fullPaper.Children.Add(fullPaperControls.View);
+            fullMemoHost = new Border { Background = Brushes.Transparent, Margin = new Thickness(4, 0, 6, 42) }; Grid.SetRow(fullMemoHost, 1); fullPaper.Children.Add(fullMemoHost);
             fullMemoHint = new TextBlock { Text = "写下此刻想到的，不用整理。", Foreground = Brush("#9AA195"), FontFamily = AppTypography.Body, FontSize = 18, Margin = new Thickness(4, 4, 0, 0), IsHitTestVisible = false };
-            Grid.SetRow(fullMemoHint, 2); fullPaper.Children.Add(fullMemoHint);
+            Grid.SetRow(fullMemoHint, 1); fullPaper.Children.Add(fullMemoHint);
             var paperSurface = new Border { CornerRadius = new CornerRadius(13, 13, 82, 13), Background = Brush("#FDFCF9"), BorderBrush = Brush("#E5E7DE"), BorderThickness = new Thickness(1), Padding = new Thickness(24), Child = fullPaper, Margin = new Thickness(0, 12, 0, 63), Effect = new DropShadowEffect { Color = System.Windows.Media.Color.FromRgb(180, 179, 166), Opacity = 0.18, BlurRadius = 18, ShadowDepth = 5 } };
             fullPaperControls.PaperSurface = paperSurface;
             var paperStage = new Grid { Margin = new Thickness(8, 0, 30, 0) }; paperStage.Children.Add(paperSurface);
             var fold = new Image { Source = AppVisuals.IllustrationSource("memo-paper-corner.png"), Width = 158, Height = 145, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(0, 0, -3, 54), IsHitTestVisible = false, Opacity = 0.68 };
             paperStage.Children.Add(fold);
+            fullPaperControls.PaperDecoration = fold;
             var paperGrip = fullPaperControls.Grabber; paperGrip.Width = 136; paperGrip.Height = 32; paperGrip.Padding = new Thickness(10, 4, 10, 4); paperGrip.Background = Brush("#FDFCF9"); paperGrip.HorizontalAlignment = HorizontalAlignment.Center; paperGrip.VerticalAlignment = VerticalAlignment.Top;
             var gripHost = new Border { CornerRadius = new CornerRadius(16), Background = Brush("#FDFCF9"), BorderBrush = Brush("#E5E7DE"), BorderThickness = new Thickness(1), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Top, Child = paperGrip, Effect = new DropShadowEffect { Color = System.Windows.Media.Color.FromRgb(160, 160, 148), Opacity = 0.2, BlurRadius = 8, ShadowDepth = 2 } };
             paperStage.Children.Add(gripHost);
@@ -246,11 +245,17 @@ namespace LocalDesktopNote
             CompletedGroup.Collapsed += delegate { if (!rendering && Store.State.CompletedExpanded) { Store.State.CompletedExpanded = false; QueueViewSave(); } if (memoSplit != null) memoSplit.Refresh(); };
             LaunchAtLoginCheck.Click += delegate { ApplyAutoStart(); };
             StartupCardCheck.Click += delegate { if (!loadingSettings && Store.State.ShowCardOnStartup != (StartupCardCheck.IsChecked == true)) { Store.State.ShowCardOnStartup = StartupCardCheck.IsChecked == true; QueueViewSave(); Flush(); } };
-            View.PreviewKeyDown += delegate(object sender, KeyEventArgs e) { if (e.Key == Key.S && (Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0) { FinishMemoHistory(); e.Handled = true; } };
+            compactPaperControls.AttachDragHost(View); fullPaperControls.AttachDragHost(View);
+            View.PreviewKeyDown += delegate(object sender, KeyEventArgs e)
+            {
+                if (e.Key == Key.Escape) { compactPaperControls.CancelPaperLift(); fullPaperControls.CancelPaperLift(); }
+                if (fullPaperControls.HandleHistoryKey(e.Key, Keyboard.Modifiers, IdeasEditor.IsKeyboardFocusWithin ? IdeasEditor : null, page == "memo" || IdeasEditor.IsKeyboardFocusWithin || compactPaperControls.View.IsKeyboardFocusWithin)) { e.Handled = true; return; }
+                if (e.Key == Key.S && (Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0) { FinishMemoHistory(); e.Handled = true; }
+            };
             Store.Changed += StoreChanged;
             Store.Saved += StoreSaved;
             Store.MemoReplaced += MemoReplaced;
-            Deactivate += delegate { FinishMemoHistory(); };
+            Deactivate += delegate { compactPaperControls.CancelPaperLift(); fullPaperControls.CancelPaperLift(); FinishMemoHistory(); };
             FormClosing += delegate(object sender, Forms.FormClosingEventArgs e)
             {
                 if (!FinishMemoHistory()) { e.Cancel = true; return; }
@@ -315,6 +320,7 @@ namespace LocalDesktopNote
         private void Navigate(string key)
         {
             if (!pages.ContainsKey(key)) return;
+            compactPaperControls.CancelPaperLift(); fullPaperControls.CancelPaperLift();
             CommitTitles();
             if (!(page == key ? Flush() : FinishMemoHistory())) return;
             page = key;
@@ -701,7 +707,7 @@ namespace LocalDesktopNote
         {
             if (disposed) return;
             saveTimer.Stop(); loading = true;
-            try { IdeasEditor.Text = Store.State.Ideas ?? ""; }
+            try { MemoPaperControls.ReplaceEditorText(IdeasEditor, Store.State.Ideas); }
             finally { loading = false; }
             dirty = viewDirty = saveFailed = false; saveFailureMessage = null;
             UpdateMemoHints();
@@ -735,7 +741,7 @@ namespace LocalDesktopNote
             loading = true;
             try
             {
-                if (!IdeasEditor.IsKeyboardFocusWithin && IdeasEditor.Text != Store.State.Ideas) IdeasEditor.Text = Store.State.Ideas;
+                if (!IdeasEditor.IsKeyboardFocusWithin && IdeasEditor.Text != Store.State.Ideas) MemoPaperControls.ReplaceEditorText(IdeasEditor, Store.State.Ideas);
                 if (!NewTaskEditor.IsKeyboardFocusWithin && NewTaskEditor.Text != Store.State.TaskDraft) NewTaskEditor.Text = Store.State.TaskDraft;
                 if (!DraftDatePicker.IsKeyboardFocusWithin && !UnplannedCheck.IsKeyboardFocusWithin)
                 {

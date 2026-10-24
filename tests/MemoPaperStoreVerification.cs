@@ -148,6 +148,116 @@ namespace LocalDesktopNote
                 "the current generation can still store the same text successfully");
         }
 
+        private static void SharedPaperUndoRedo()
+        {
+            var f = new Fixture("paper-undo-redo", "最初的纸页 A");
+            byte[] initial = File.ReadAllBytes(f.Store.PathName);
+            Check(!f.Store.CanUndoMemoPaper && !f.Store.CanRedoMemoPaper && !f.Store.UndoMemoPaper() && !f.Store.RedoMemoPaper(),
+                "a fresh shared store has no paper actions to undo or redo");
+            Check(initial.SequenceEqual(File.ReadAllBytes(f.Store.PathName)) && f.Store.MemoPaperGeneration == 0,
+                "unavailable paper undo or redo neither saves nor changes sheet identity");
+            f.Store.State.Ideas = "普通自动保存"; f.Store.Save();
+            Check(!f.Store.CanUndoMemoPaper && !f.Store.CanRedoMemoPaper, "ordinary typing autosave never creates a paper action");
+            f.Store.State.Ideas = "最初的纸页 A"; f.Store.Save();
+            bool seenUndoAtSave = false, seenRedoAtReplace = false;
+            f.Store.Saved += delegate { seenUndoAtSave = f.Store.CanUndoMemoPaper; };
+            f.Store.MemoReplaced += delegate { seenRedoAtReplace = f.Store.CanRedoMemoPaper; };
+            f.Store.StoreCurrentMemo("archive");
+            Check(seenUndoAtSave && f.Store.CanUndoMemoPaper && !f.Store.CanRedoMemoPaper,
+                "shared observers see undo availability only after the archived page commits");
+            f.Store.OpenMemoText("从历史取回的纸页 B");
+            f.Store.StoreCurrentMemo("trash");
+            int originalPapers = f.PaperCount;
+            string[] ids = f.Store.State.MemoPapers.Select(p => p.Id).ToArray();
+            Check(f.Store.UndoMemoPaper() && f.Persisted.Ideas == "从历史取回的纸页 B" && seenRedoAtReplace,
+                "undo restores the most recent trashed page through the shared store");
+            Check(f.Store.UndoMemoPaper() && f.Persisted.Ideas == "", "undo of history take-back returns to its previous blank page");
+            Check(f.Store.UndoMemoPaper() && f.Persisted.Ideas == "最初的纸页 A" && !f.Store.CanUndoMemoPaper,
+                "archive, take-back and trash form one ordered paper action history");
+            Check(f.Store.RedoMemoPaper() && f.Persisted.Ideas == "", "redo of archive returns to the blank page");
+            Check(f.Store.RedoMemoPaper() && f.Persisted.Ideas == "从历史取回的纸页 B", "redo of history take-back restores its target");
+            Check(f.Store.RedoMemoPaper() && f.Persisted.Ideas == "" && !f.Store.CanRedoMemoPaper,
+                "redo of trash completes the same ordered history without a remaining redo");
+            Check(f.PaperCount == originalPapers && ids.SequenceEqual(f.Store.State.MemoPapers.Select(p => p.Id)),
+                "paper undo and redo preserve every stored paper identity without duplicating normal replay");
+            Check(f.Store.MemoPaperGeneration == 9, "each of three actions and six successful replays invalidates earlier drags once");
+            f.Store.UndoMemoPaper();
+            Check(f.Store.CanRedoMemoPaper && !f.Store.OpenMemoText(f.Store.State.Ideas) && f.Store.CanRedoMemoPaper,
+                "same-current take-back is a no-op that preserves redo availability");
+            f.Store.State.Ideas += " 继续输入"; f.Store.Save();
+            Check(f.Store.CanRedoMemoPaper, "ordinary autosave does not silently replace the paper redo history");
+            f.Store.OpenMemoText("新的主动取回动作");
+            Check(!f.Store.CanRedoMemoPaper && f.Store.CanUndoMemoPaper, "a new committed paper action clears the former redo branch");
+            f.Store = f.Open();
+            Check(!f.Store.CanUndoMemoPaper && !f.Store.CanRedoMemoPaper && f.Store.State.Ideas == "新的主动取回动作",
+                "paper command history is runtime-only while its resulting text survives restart");
+        }
+
+        private static void ReplayProtectsInterveningText()
+        {
+            var f = new Fixture("paper-replay-protection", "被投放的原始纸页");
+            var original = f.Store.StoreCurrentMemo("trash");
+            f.Store.State.Ideas = "换页后还没自动保存的新内容";
+            Check(f.Store.UndoMemoPaper() && f.Persisted.Ideas == original.Text,
+                "undo can restore a paper while the current page contains new unsaved text");
+            Check(f.Persisted.MemoPapers.Last().Text == "换页后还没自动保存的新内容" && f.Persisted.MemoPapers.Last().Kind == "archive",
+                "undo protects intervening unsaved text in the same atomic replacement");
+            f.Store.State.Ideas = "撤销以后、重做以前又写的内容";
+            Check(f.Store.RedoMemoPaper() && f.Persisted.Ideas == "换页后还没自动保存的新内容",
+                "redo returns to the actual page that undo left, including its intervening writing");
+            Check(f.Persisted.MemoPapers.Last().Text == "撤销以后、重做以前又写的内容" && f.Persisted.MemoPapers.Last().Kind == "archive",
+                "redo archives its intervening text instead of discarding it");
+            Check(f.Persisted.MemoPapers[0].Id == original.Id && f.Persisted.MemoPapers[0].Kind == "trash",
+                "both directions retain the original trash paper and its recoverable kind");
+            Check(f.Store.UndoMemoPaper() && f.Persisted.Ideas == "撤销以后、重做以前又写的内容",
+                "undo after redo returns to the latest actual page left before that redo");
+            Check(f.Store.RedoMemoPaper() && f.Persisted.Ideas == "换页后还没自动保存的新内容" && f.PaperCount == 3,
+                "repeated snapshot exchange restores either page without duplicating its protected archives");
+            f.Store = f.Open();
+            Check(f.Store.State.Ideas == "换页后还没自动保存的新内容" && f.PaperCount == 3 && f.Store.State.MemoPapers.Any(p => p.Text == "换页后还没自动保存的新内容")
+                && f.Store.State.MemoPapers.Any(p => p.Text == "撤销以后、重做以前又写的内容"),
+                "both protected editor buffers remain recoverable after restart");
+        }
+
+        private static void ReplayFailureIsRetryable()
+        {
+            var f = new Fixture("paper-replay-failure", "需要撤销恢复的纸页");
+            f.Store.StoreCurrentMemo("archive");
+            f.Store.State.Ideas = "撤销失败时仍要保留的未保存文字";
+            byte[] before = File.ReadAllBytes(f.Store.PathName);
+            var collection = f.Store.State.MemoPapers;
+            long generation = f.Store.MemoPaperGeneration;
+            bool failed;
+            using (var held = new FileStream(f.Store.PathName, FileMode.Open, FileAccess.Read, FileShare.Read))
+                failed = FailsIo(delegate { f.Store.UndoMemoPaper(); });
+            Check(failed && f.Store.State.Ideas == "撤销失败时仍要保留的未保存文字" && Object.ReferenceEquals(collection, f.Store.State.MemoPapers),
+                "failed undo rolls back both text and its protective archive addition");
+            Check(f.Store.CanUndoMemoPaper && !f.Store.CanRedoMemoPaper && f.Store.MemoPaperGeneration == generation,
+                "failed undo leaves the shared action stacks and sheet identity retryable");
+            Check(before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)), "failed undo preserves exact primary bytes");
+            Check(f.Store.UndoMemoPaper() && f.Persisted.Ideas == "需要撤销恢复的纸页" && f.PaperCount == 2,
+                "undo retry stores the intervening buffer only once");
+            f.Store.State.Ideas = "重做失败时保留的新文字";
+            before = File.ReadAllBytes(f.Store.PathName); collection = f.Store.State.MemoPapers; generation = f.Store.MemoPaperGeneration;
+            using (var held = new FileStream(f.Store.PathName, FileMode.Open, FileAccess.Read, FileShare.Read))
+                failed = FailsIo(delegate { f.Store.RedoMemoPaper(); });
+            Check(failed && f.Store.State.Ideas == "重做失败时保留的新文字" && Object.ReferenceEquals(collection, f.Store.State.MemoPapers),
+                "failed redo restores the live editor buffer and existing paper collection");
+            Check(!f.Store.CanUndoMemoPaper && f.Store.CanRedoMemoPaper && f.Store.MemoPaperGeneration == generation,
+                "failed redo retains its action without advancing the sheet generation");
+            Check(before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)), "failed redo preserves exact primary bytes");
+            Check(f.Store.RedoMemoPaper() && f.Persisted.Ideas == "撤销失败时仍要保留的未保存文字" && f.PaperCount == 3,
+                "redo retry protects the latest buffer once and returns to the exact page left by the successful undo");
+
+            Check(f.Store.UndoMemoPaper() && f.Persisted.Ideas == "重做失败时保留的新文字" && f.Store.CanRedoMemoPaper,
+                "after failed redo and retry, undo still returns to the exact live text from before the retry");
+            generation = f.Store.MemoPaperGeneration;
+            using (var held = new FileStream(f.Store.PathName, FileMode.Open, FileAccess.Read, FileShare.Read))
+                failed = FailsIo(delegate { f.Store.OpenMemoText("未成功的新取回动作"); });
+            Check(failed && f.Store.CanRedoMemoPaper && f.Store.MemoPaperGeneration == generation,
+                "a failed new paper action cannot clear a previously available redo");
+        }
+
         private static void RestoreWithProtection()
         {
             var f = new Fixture("restore", "旧纸张");
@@ -262,6 +372,7 @@ namespace LocalDesktopNote
             try
             {
                 EmptyAndExpectedText(); StoreAndRestart("archive"); StoreAndRestart("trash"); PrimaryWriteFailure(); SameTextSheetIdentity();
+                SharedPaperUndoRedo(); ReplayProtectsInterveningText(); ReplayFailureIsRetryable();
                 RestoreWithProtection(); NotificationFailures(); TaskAndHistoryIsolation(); LegacyAndHistoryFailure();
                 Report.AppendLine("RESULT: " + assertions + " assertions passed, 0 failed");
             }

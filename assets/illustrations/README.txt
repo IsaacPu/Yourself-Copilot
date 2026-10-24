@@ -1,6 +1,7 @@
 随手记视觉素材
 
 memo-bin.png：可点击、可投放的纸篓图像。
+memo-bin-filled.png：同一纸篓内有暖白纸团的状态，纸篓存有旧纸时显示。
 memo-paper-corner.png：纸页右下卷角装饰，不参与鼠标命中。
 memo-drop-arrow.png：纸页向纸篓投放的方向提示，不参与鼠标命中。
 

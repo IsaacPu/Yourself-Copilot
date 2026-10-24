@@ -114,7 +114,8 @@ namespace LocalDesktopNote
                     surface + " " + kind + " commits the latest actual editor text and blank state together");
                 Check(!Field<bool>(f.Card, "dirty") && !Field<bool>(f.Bench, "dirty") && !Field<Forms.Timer>(f.Card, "saveTimer").Enabled && !Field<Forms.Timer>(f.Bench, "saveTimer").Enabled,
                     surface + " replacement clears stale dirty flags and stops both save timers");
-                Check(controls.UndoButton.Visibility == Visibility.Visible, surface + " exposes undo after a successful paper action");
+                Check(f.Store.CanUndoMemoPaper && !f.Store.CanRedoMemoPaper, surface + " exposes a shared keyboard undo after a successful paper action");
+                Check(typeof(MemoPaperControls).GetField("UndoButton", BindingFlags.Instance | BindingFlags.NonPublic) == null, surface + " has no explicit paper undo button");
                 DisabledWhenBlank(f, surface);
                 int count = f.PaperCount;
                 Check(!controls.StorePaper(kind, null) && f.PaperCount == count, surface + " repeated activation on a blank sheet cannot duplicate a stored paper");
@@ -132,12 +133,12 @@ namespace LocalDesktopNote
                 Click(controls.TrashButton);
                 string interim = "上一页放入纸篓后，继续写下的新想法";
                 f.Editor(surface).Text = interim;
-                Click(controls.UndoButton);
+                Check(controls.Undo(), surface + " shared paper undo succeeds");
                 Check(f.Card.IdeasEditor.Text == f.Original && f.Bench.IdeasEditor.Text == f.Original && f.Persisted.Ideas == f.Original,
                     surface + " undo returns the discarded paper to both actual editors");
                 Check(f.PaperCount == 2 && f.Persisted.MemoPapers.Any(p => p.Kind == "archive" && p.Text == interim), surface + " undo first stores intervening unsaved content safely");
                 Check(f.Persisted.MemoPapers.Any(p => p.Kind == "trash" && p.Text == f.Original), surface + " undo retains the original recovery paper");
-                Check(controls.UndoButton.Visibility == Visibility.Collapsed && !controls.Undo(), surface + " completed undo consumes its one-shot action");
+                Check(!f.Store.CanUndoMemoPaper && f.Store.CanRedoMemoPaper && !controls.Undo(), surface + " completed undo advances the shared stack and enables redo");
                 Check(f.Controls("card").ArchiveButton.IsEnabled && f.Controls("full").TrashButton.IsEnabled, surface + " nonempty restored content re-enables sheet actions");
                 f.CheckTasks(surface + " undo");
             }
@@ -158,25 +159,13 @@ namespace LocalDesktopNote
                     Check(f.Store.State.Ideas == current && f.Card.IdeasEditor.Text == current && f.Bench.IdeasEditor.Text == current,
                         surface + " failed " + (unsaved ? "flush" : "atomic storage") + " keeps the exact original text in both editors");
                     Check(count == f.PaperCount && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)), surface + " failed storage leaves the paper collection and primary bytes unchanged");
-                    Check(controls.UndoButton.Visibility == Visibility.Collapsed && controls.ArchiveButton.IsEnabled, surface + " failed storage leaves no false undo and remains retryable");
+                    Check(!f.Store.CanUndoMemoPaper && !f.Store.CanRedoMemoPaper && controls.ArchiveButton.IsEnabled, surface + " failed storage leaves no false undo or redo and remains retryable");
                     Check(f.Status(surface).Contains("失败") || f.Status(surface).Contains("没有换页"), surface + " failed storage exposes a visible retry message");
                 }
                 finally { Directory.Delete(f.Store.PathName + ".tmp"); }
                 Click(controls.ArchiveButton);
                 Check(f.Persisted.Ideas == "" && f.Persisted.MemoPapers.Single().Text == current, surface + " successful retry preserves the same content exactly once");
             }
-        }
-
-        private static DragEventArgs DragArgs(UIElement target, IDataObject data, RoutedEvent routedEvent)
-        {
-            var constructor = typeof(DragEventArgs).GetConstructors(BindingFlags.NonPublic | BindingFlags.Instance)
-                .Single(c => c.GetParameters().Length == 5 && c.GetParameters()[0].ParameterType == typeof(IDataObject));
-            var args = (DragEventArgs)constructor.Invoke(new object[] { data, DragDropKeyStates.LeftMouseButton, DragDropEffects.Move, target, new Point(4, 4) });
-            args.RoutedEvent = routedEvent; args.Source = target; return args;
-        }
-        private static DragEventArgs RouteDrag(MemoPaperControls controls, IDataObject data, RoutedEvent routedEvent)
-        {
-            DragEventArgs args = DragArgs(controls.Bin, data, routedEvent); controls.Bin.RaiseEvent(args); return args;
         }
 
         private static int BoundHandlers(UIElement element, RoutedEvent routedEvent, object target, string methodName)
@@ -199,34 +188,50 @@ namespace LocalDesktopNote
             using (var f = new Fixture("drag-" + surface))
             {
                 f.Use(surface); var controls = f.Controls(surface);
-                Check(controls.Bin.AllowDrop && controls.Grabber.Cursor == Cursors.Hand, surface + " exposes a hand grip and a dedicated bin drop target");
+                Grid root = surface == "card" ? f.Card.View : f.Bench.View;
+                Layout(root, surface == "card" ? 410 : 1026, surface == "card" ? 600 : 800);
+                Point grip = Center(controls.Grabber, root), bin = Center(controls.Bin, root);
+                double restingOpacity = controls.PaperSurface.Opacity;
+                Check(controls.Grabber.Cursor == Cursors.Hand && !controls.IsPaperLifted, surface + " exposes a hand grip without entering a native forbidden-drop mode");
                 Check(BoundHandlers(controls.Grabber, UIElement.PreviewMouseLeftButtonDownEvent, controls, "BeginDrag") == 1
                     && BoundHandlers(controls.Grabber, UIElement.PreviewMouseMoveEvent, controls, "MoveDrag") == 1,
                     surface + " binds whole-paper drag handlers to the dedicated grip");
                 Check(BoundHandlers(f.Editor(surface), UIElement.PreviewMouseLeftButtonDownEvent, controls, "BeginDrag") == 0
                     && BoundHandlers(f.Editor(surface), UIElement.PreviewMouseMoveEvent, controls, "MoveDrag") == 0,
                     surface + " leaves editor text selection free of whole-paper drag handlers");
-                int initialSaved = f.Saved; byte[] before = File.ReadAllBytes(f.Store.PathName);
-                var external = new DataObject(DataFormats.UnicodeText, "外部拖入的文字");
-                DragEventArgs externalOver = RouteDrag(controls, external, DragDrop.DragOverEvent);
-                DragEventArgs externalDrop = RouteDrag(controls, external, DragDrop.DropEvent);
-                Check(externalOver.Effects == DragDropEffects.None && externalDrop.Effects == DragDropEffects.None, surface + " rejects ordinary external data on both hover and drop");
-                var foreignStore = new WorkboardStore(Path.Combine(Storage.Folder, "foreign", surface));
-                var foreign = new DataObject(typeof(MemoPaperControls.PaperDrag), new MemoPaperControls.PaperDrag(foreignStore, f.Original));
-                Check(RouteDrag(controls, foreign, DragDrop.DropEvent).Effects == DragDropEffects.None, surface + " rejects a paper belonging to a different store");
-                var valid = new DataObject(typeof(MemoPaperControls.PaperDrag), new MemoPaperControls.PaperDrag(f.Store, f.Original));
-                DragEventArgs hover = RouteDrag(controls, valid, DragDrop.DragOverEvent);
-                Check(hover.Effects == DragDropEffects.Move && f.PaperCount == 0 && f.Store.State.Ideas == f.Original, surface + " valid drag-over only previews a possible action");
-                RouteDrag(controls, valid, DragDrop.DragLeaveEvent);
-                Check(controls.Bin.ToolTip == null && f.Saved == initialSaved && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)), surface + " cancelling or leaving a drag never saves, clears or stores a paper");
+                Check(!controls.FinishPaperLift(bin) && f.PaperCount == 0, surface + " a release without an internal paper lift cannot accept external content");
+                Check(controls.StartPaperLift(grip), surface + " the actual lift controller starts from the laid-out native paper");
+                root.UpdateLayout();
+                Check(controls.IsPaperLifted && controls.DragPreview != null && !controls.DragPreview.IsHitTestVisible,
+                    surface + " shows a non-hit-testable paper visual while the paper is held");
+                Check(controls.PaperSurface.Opacity < restingOpacity && controls.DragPreview.ActualWidth > 30 && controls.DragPreview.ActualHeight > 30,
+                    surface + " visibly lifts a substantial real paper instead of a cursor-only drag");
+                Point first = controls.DragPreview.TranslatePoint(new Point(), root);
+                controls.MovePaperLift(new Point(grip.X + 52, grip.Y + 43)); root.UpdateLayout();
+                Point second = controls.DragPreview.TranslatePoint(new Point(), root);
+                Check(Math.Abs((second.X - first.X) - 52) < 2 && Math.Abs((second.Y - first.Y) - 43) < 2,
+                    surface + " held paper follows the pointer displacement in both axes");
+                Snapshot(root, "memo-paper-lift-" + surface + ".png");
+                byte[] before = File.ReadAllBytes(f.Store.PathName);
+                controls.MovePaperLift(bin);
+                Check(f.PaperCount == 0 && f.Store.State.Ideas == f.Original && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)), surface + " hovering above the bin never commits or clears a held paper");
+                controls.CancelPaperLift(); root.UpdateLayout();
+                Check(!controls.IsPaperLifted && controls.DragPreview == null && controls.PaperSurface.Opacity == restingOpacity && controls.Bin.ToolTip == null,
+                    surface + " cancel restores the stationary paper and removes the held visual and bin highlight");
+                Check(before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)) && f.PaperCount == 0 && f.Store.State.Ideas == f.Original,
+                    surface + " cancelled lift preserves exact disk bytes and original content");
+                Check(controls.StartPaperLift(grip) && !controls.FinishPaperLift(new Point(-20, -20)) && !controls.IsPaperLifted,
+                    surface + " releasing outside the application restores the original sheet without storing it");
+                Check(before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)) && f.PaperCount == 0, surface + " outside release creates no hidden history paper");
+                Check(controls.StartPaperLift(grip), surface + " a fresh lift starts before a concurrent editor change");
                 f.Editor(surface).Text += "拖动期间又写了内容"; string updated = f.Store.State.Ideas;
-                DragEventArgs stale = RouteDrag(controls, valid, DragDrop.DropEvent);
-                Check(stale.Effects == DragDropEffects.None && f.PaperCount == 0 && f.Store.State.Ideas == updated, surface + " rejects a stale paper drag after a real editor change");
-                var latest = new DataObject(typeof(MemoPaperControls.PaperDrag), new MemoPaperControls.PaperDrag(f.Store, updated));
-                DragEventArgs dropped = RouteDrag(controls, latest, DragDrop.DropEvent);
-                Check(dropped.Handled && dropped.Effects == DragDropEffects.Move && f.Persisted.Ideas == "", surface + " routed valid drop commits a blank sheet");
-                Check(f.Persisted.MemoPapers.Single().Kind == "trash" && f.Persisted.MemoPapers.Single().Text == updated, surface + " routed drop stores exactly the accepted whole paper in the bin");
-                Check(f.Card.IdeasEditor.Text == "" && f.Bench.IdeasEditor.Text == "", surface + " routed drop replaces both real editor controls");
+                Check(!controls.FinishPaperLift(bin) && f.PaperCount == 0 && f.Store.State.Ideas == updated && !controls.IsPaperLifted,
+                    surface + " rejects a held paper made stale by a real editor change");
+                bool restarted = controls.StartPaperLift(grip);
+                Check(restarted && controls.FinishPaperLift(bin) && !controls.IsPaperLifted && f.Persisted.Ideas == "", surface + " releasing the current held paper inside the bin commits a blank sheet");
+                Check(f.Persisted.MemoPapers.Single().Kind == "trash" && f.Persisted.MemoPapers.Single().Text == updated, surface + " valid release stores exactly the accepted whole paper in the bin");
+                Check(f.Card.IdeasEditor.Text == "" && f.Bench.IdeasEditor.Text == "", surface + " valid release replaces both real editor controls");
+                Check(!controls.FinishPaperLift(bin) && f.PaperCount == 1 && !controls.StartPaperLift(grip), surface + " a duplicate release or lift of the blank replacement cannot store another paper");
                 f.CheckTasks(surface + " drop");
             }
         }
@@ -236,19 +241,100 @@ namespace LocalDesktopNote
             using (var f = new Fixture("same-text-drag-" + surface))
             {
                 f.Use(surface); var controls = f.Controls(surface);
-                var stale = new DataObject(typeof(MemoPaperControls.PaperDrag), new MemoPaperControls.PaperDrag(f.Store, f.Original));
-                Click(controls.ArchiveButton); Click(controls.UndoButton);
+                Grid root = surface == "card" ? f.Card.View : f.Bench.View;
+                Layout(root, surface == "card" ? 410 : 1026, surface == "card" ? 600 : 800);
+                Point grip = Center(controls.Grabber, root), bin = Center(controls.Bin, root);
+                Check(controls.StartPaperLift(grip), surface + " starts a real held-sheet session before same-text replacement");
+                Click(controls.ArchiveButton); controls.Undo();
                 Check(f.Persisted.Ideas == f.Original && f.Card.IdeasEditor.Text == f.Original && f.Bench.IdeasEditor.Text == f.Original,
                     surface + " archive and real undo return identical text on a new active sheet");
                 byte[] before = File.ReadAllBytes(f.Store.PathName); int papers = f.PaperCount;
-                DragEventArgs hover = RouteDrag(controls, stale, DragDrop.DragOverEvent);
-                DragEventArgs drop = RouteDrag(controls, stale, DragDrop.DropEvent);
-                Check(hover.Effects == DragDropEffects.None && drop.Effects == DragDropEffects.None && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)) && f.PaperCount == papers,
-                    surface + " rejects a drag from before the same-text replacement without saving or discarding the newer sheet");
-                var current = new DataObject(typeof(MemoPaperControls.PaperDrag), new MemoPaperControls.PaperDrag(f.Store, f.Original));
-                Check(RouteDrag(controls, current, DragDrop.DropEvent).Effects == DragDropEffects.Move && f.Persisted.Ideas == "" && f.PaperCount == papers + 1,
+                Check(!controls.FinishPaperLift(bin) && !controls.IsPaperLifted && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)) && f.PaperCount == papers,
+                    surface + " rejects a held session from before same-text replacement without discarding the newer sheet");
+                Check(controls.StartPaperLift(grip) && controls.FinishPaperLift(bin) && f.Persisted.Ideas == "" && f.PaperCount == papers + 1,
                     surface + " a newly grabbed replacement sheet remains valid for normal drop");
                 f.CheckTasks(surface + " same-text drag rejection");
+            }
+        }
+
+        private static Point Center(FrameworkElement element, Grid root)
+        {
+            return element.TranslatePoint(new Point(element.ActualWidth / 2, element.ActualHeight / 2), root);
+        }
+
+        private static void KeyboardHistory(string surface)
+        {
+            using (var f = new Fixture("keyboard-" + surface))
+            {
+                f.Use(surface); var controls = f.Controls(surface); TextBox editor = f.Editor(surface);
+                Layout(surface == "card" ? f.Card.View : f.Bench.View, surface == "card" ? 410 : 1026, surface == "card" ? 600 : 800);
+                var peer = f.Controls(surface == "card" ? "full" : "card");
+                TextBox peerEditor = surface == "card" ? f.Bench.IdeasEditor : f.Card.IdeasEditor;
+                Click(controls.TrashButton);
+                Check(!editor.CanUndo && !editor.CanRedo && !peerEditor.CanUndo && !peerEditor.CanRedo,
+                    surface + " real replacement clears both editors local undo so old papers cannot bypass the shared stack");
+                Check(peer.HandleHistoryKey(Key.Z, ModifierKeys.Control, peerEditor, true) && f.Persisted.Ideas == f.Original && f.Store.CanRedoMemoPaper,
+                    surface + " Ctrl+Z in the peer window undoes the same shared paper operation");
+                Check(f.Card.IdeasEditor.Text == f.Original && f.Bench.IdeasEditor.Text == f.Original && !editor.CanUndo && !peerEditor.CanUndo,
+                    surface + " paper undo synchronizes both editors without creating a local replacement undo unit");
+                string tail = "正文局部编辑优先于纸页切换";
+                editor.Select(editor.Text.Length, 0); editor.BeginChange(); editor.SelectedText = tail; editor.EndChange();
+                Check(editor.CanUndo && f.Store.State.Ideas == f.Original + tail, surface + " a genuine TextBox edit creates local undo on the current paper");
+                Check(peerEditor.Text == editor.Text && !peerEditor.CanUndo && !peerEditor.CanRedo,
+                    surface + " the peer editor mirrors current text without retaining undo units for obsolete projections");
+                Check(controls.HandleHistoryKey(Key.Z, ModifierKeys.Control, editor, true) && editor.Text == f.Original && f.Store.CanRedoMemoPaper,
+                    surface + " Ctrl+Z consumes local text undo before traveling the paper stack");
+                Check(editor.CanRedo && controls.HandleHistoryKey(Key.Y, ModifierKeys.Control, editor, true) && editor.Text == f.Original + tail && f.Store.CanRedoMemoPaper,
+                    surface + " Ctrl+Y consumes local text redo before traveling the paper stack");
+                Check(controls.HandleHistoryKey(Key.Y, ModifierKeys.Control, editor, true) && f.Persisted.Ideas == "" && !f.Store.CanRedoMemoPaper,
+                    surface + " Ctrl+Y redoes the paper action when no local text redo remains");
+                Check(f.Persisted.MemoPapers.Any(p => p.Kind == "archive" && p.Text == f.Original + tail),
+                    surface + " paper redo protects text written since the matching paper undo");
+                Check(controls.HandleHistoryKey(Key.Z, ModifierKeys.Control, editor, true) && f.Persisted.Ideas == f.Original + tail,
+                    surface + " the next paper undo restores the actual text present before redo");
+                byte[] before = File.ReadAllBytes(f.Store.PathName); string current = editor.Text;
+                Check(!controls.HandleHistoryKey(Key.Z, ModifierKeys.Control, editor, false) && editor.Text == current && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)),
+                    surface + " task and unrelated editor scopes retain their own Ctrl+Z behavior");
+                Check(!controls.HandleHistoryKey(Key.ImeProcessed, ModifierKeys.Control, editor, true)
+                    && !controls.HandleHistoryKey(Key.Z, ModifierKeys.Control | ModifierKeys.Alt, editor, true),
+                    surface + " IME processed keys and unrelated modifier chords never trigger a paper switch");
+                f.CheckTasks(surface + " keyboard history");
+            }
+        }
+
+        private static void LiftCancellationRoutes(string surface)
+        {
+            using (var f = new Fixture("lift-cancel-" + surface))
+            {
+                f.Use(surface); var controls = f.Controls(surface);
+                Grid root = surface == "card" ? f.Card.View : f.Bench.View;
+                double width = surface == "card" ? 410 : 1026, height = surface == "card" ? 600 : 800;
+                Layout(root, width, height);
+                Check(controls.StartPaperLift(Center(controls.Grabber, root)), surface + " begins a held visual before simulated capture loss");
+                byte[] before = File.ReadAllBytes(f.Store.PathName);
+                controls.Grabber.RaiseEvent(new MouseEventArgs(Mouse.PrimaryDevice, 0) { RoutedEvent = Mouse.LostMouseCaptureEvent });
+                Check(!controls.IsPaperLifted && controls.DragPreview == null && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)) && f.PaperCount == 0,
+                    surface + " the actual LostMouseCapture route cancels the held visual without persisting a discarded paper");
+                Check(controls.StartPaperLift(Center(controls.Grabber, root)), surface + " begins a held visual before resizing its host");
+                Layout(root, width + 35, height + 20);
+                Check(!controls.IsPaperLifted && controls.DragPreview == null && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)),
+                    surface + " a real host size change cancels the lift so stale bin coordinates cannot commit");
+                Point release = Center(controls.Bin, root);
+                Check(controls.StartPaperLift(Center(controls.Grabber, root)), surface + " begins a held visual before hiding its grip");
+                controls.Grabber.Visibility = Visibility.Collapsed; root.UpdateLayout();
+                Check(!controls.FinishPaperLift(release) && !controls.IsPaperLifted && controls.DragPreview == null && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)),
+                    surface + " releasing after the source grip is collapsed rejects the drop and restores its original text");
+                controls.Grabber.Visibility = Visibility.Visible; root.UpdateLayout();
+                Check(controls.StartPaperLift(Center(controls.Grabber, root)), surface + " begins a held visual before leaving its paper page");
+                if (surface == "card") root.Visibility = Visibility.Collapsed; else f.Navigate("history");
+                Check(!controls.FinishPaperLift(release) && !controls.IsPaperLifted && f.Store.State.Ideas == f.Original && f.PaperCount == 0,
+                    surface + " a sheet from a hidden or navigated-away page cannot be committed with its old bin coordinates");
+                Check(!controls.StartPaperLift(release), surface + " the hidden page cannot start a fresh paper lift");
+                if (surface == "card") root.Visibility = Visibility.Visible; else f.Use(surface);
+                controls.CancelPaperLift(); controls.CancelPaperLift();
+                Check(!controls.IsPaperLifted && f.Store.State.Ideas == f.Original && f.PaperCount == 0,
+                    surface + " repeated cleanup is idempotent and leaves the original current paper intact");
+                f.CheckTasks(surface + " cancellation routes");
             }
         }
 
@@ -328,11 +414,13 @@ namespace LocalDesktopNote
                     Run(current + " unsaved flush failure", delegate { FailedStorage(current, true); });
                     Run(current + " routed drag boundaries", delegate { DragBoundaries(current); });
                     Run(current + " same-text sheet drag boundaries", delegate { SameTextReplacementInvalidatesDrag(current); });
+                    Run(current + " local and shared keyboard history", delegate { KeyboardHistory(current); });
+                    Run(current + " lost capture resize and hidden grip", delegate { LiftCancellationRoutes(current); });
                 }
                 Run("history recovery and native snapshots", HistoryRestoreAndSnapshots);
                 Run("selected concept and responsive paper", ReferenceVisual);
                 Report.AppendLine("Passed: " + passed + "; Failed: " + failed);
-                Report.AppendLine("LIMIT: isolated production WinForms/WPF constructors, TextChanged, routed Button.Click and DragOver/DragLeave/Drop events, primary IO failures, fresh store loading, and hidden native WPF rendering. DragEventArgs are constructed through the .NET Framework internal constructor. Handler inspection verifies only the grip owns whole-paper drag source handlers. No Show/Attach, physical pointer drag, native keyboard focus, production data, registry or production process changes.");
+                Report.AppendLine("LIMIT: isolated production WinForms/WPF constructors, TextChanged, routed Button.Click and LostMouseCapture, shared pointer-controller methods used by actual handlers, local TextBox Undo/Redo and shared keyboard controller, real host resizing, primary IO failures, fresh store loading, and hidden native WPF rendering. Handler inspection verifies only the grip owns whole-paper drag source handlers. No Show/Attach, physical pointer capture or native keyboard-focus automation, production data, registry or production process changes.");
                 return failed == 0 ? 0 : 1;
             }
             finally { File.WriteAllText(Path.Combine(Storage.Folder, "verification-memo-paper-window.txt"), Report.ToString(), new UTF8Encoding(false)); }

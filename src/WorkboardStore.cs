@@ -59,6 +59,16 @@ namespace LocalDesktopNote
         internal event EventHandler Saved;
         internal event EventHandler MemoReplaced;
         internal long MemoPaperGeneration { get; private set; }
+        private readonly Stack<MemoPaperChange> memoUndo = new Stack<MemoPaperChange>();
+        private readonly Stack<MemoPaperChange> memoRedo = new Stack<MemoPaperChange>();
+        internal bool CanUndoMemoPaper { get { return memoUndo.Count != 0; } }
+        internal bool CanRedoMemoPaper { get { return memoRedo.Count != 0; } }
+
+        private sealed class MemoPaperChange
+        {
+            internal readonly string Before, After;
+            internal MemoPaperChange(string before, string after) { Before = before; After = after; }
+        }
         private bool preserveBackup;
         private bool notifying;
         private byte[] previousSavedBytes;
@@ -241,7 +251,7 @@ namespace LocalDesktopNote
                 throw new InvalidOperationException("随手记已发生变化，请按当前内容重新操作。");
             if (String.IsNullOrWhiteSpace(current)) return null;
             var paper = NewMemoPaper(current, kind);
-            ReplaceMemo("", paper);
+            ReplaceMemo("", paper, delegate { RecordMemoChange(current, ""); });
             return paper;
         }
 
@@ -250,7 +260,40 @@ namespace LocalDesktopNote
             text = text ?? "";
             string current = State.Ideas ?? "";
             if (String.Equals(current, text, StringComparison.Ordinal)) return false;
-            ReplaceMemo(text, String.IsNullOrWhiteSpace(current) ? null : NewMemoPaper(current, "archive"));
+            ReplaceMemo(text, String.IsNullOrWhiteSpace(current) ? null : NewMemoPaper(current, "archive"),
+                delegate { RecordMemoChange(current, text); });
+            return true;
+        }
+
+        private void RecordMemoChange(string before, string after)
+        {
+            memoUndo.Push(new MemoPaperChange(before, after));
+            memoRedo.Clear();
+        }
+
+        internal bool UndoMemoPaper() { return ReplayMemoChange(false); }
+        internal bool RedoMemoPaper() { return ReplayMemoChange(true); }
+
+        private bool ReplayMemoChange(bool redo)
+        {
+            Stack<MemoPaperChange> from = redo ? memoRedo : memoUndo;
+            Stack<MemoPaperChange> to = redo ? memoUndo : memoRedo;
+            if (from.Count == 0) return false;
+            MemoPaperChange change = from.Peek();
+            string expected = redo ? change.Before : change.After;
+            string target = redo ? change.After : change.Before;
+            string current = State.Ideas ?? "";
+            // Typing since the paper action is a separate editor buffer. Keep it
+            // as an archive before replaying the paper action, never overwrite it.
+            MemoPaper protection = !String.IsNullOrWhiteSpace(current) && current != expected && current != target
+                ? NewMemoPaper(current, "archive") : null;
+            ReplaceMemo(target, protection, delegate
+            {
+                from.Pop();
+                // A reverse command returns to the actual page we just left,
+                // including any writing since the original paper action.
+                to.Push(redo ? new MemoPaperChange(current, target) : new MemoPaperChange(target, current));
+            });
             return true;
         }
 
@@ -260,7 +303,7 @@ namespace LocalDesktopNote
                 StoredAtUtc = UtcNowProvider().ToUniversalTime().ToString("o", CultureInfo.InvariantCulture), Kind = kind };
         }
 
-        private void ReplaceMemo(string text, MemoPaper paper)
+        private void ReplaceMemo(string text, MemoPaper paper, Action historyCommitted)
         {
             string previousText = State.Ideas;
             List<MemoPaper> previousPapers = State.MemoPapers;
@@ -279,6 +322,9 @@ namespace LocalDesktopNote
                     // Even identical text taken back onto a new sheet invalidates
                     // an older drag. Advance only with durable primary replacement.
                     MemoPaperGeneration = unchecked(MemoPaperGeneration + 1);
+                    // Publish availability with the same durable commit as the
+                    // text replacement so every shared window sees one history.
+                    historyCommitted();
                 });
             }
             catch
