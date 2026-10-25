@@ -65,7 +65,8 @@ try {
         'icons/svg/ic_fluent_image_multiple_24_regular.svg','icons/svg/ic_fluent_more_horizontal_24_regular.svg',
         'icons/svg/ic_fluent_note_24_regular.svg','icons/svg/ic_fluent_settings_24_regular.svg',
         'icons/svg/ic_fluent_archive_24_regular.svg','icons/svg/ic_fluent_delete_24_regular.svg',
-        'illustrations/memo-bin.png','illustrations/memo-bin-filled.png','illustrations/memo-paper-corner.png','illustrations/memo-drop-arrow.png','illustrations/README.txt'
+        'illustrations/memo-bin.png','illustrations/memo-bin-filled.png','illustrations/memo-paper-corner.png','illustrations/memo-drop-arrow.png','illustrations/README.txt',
+        'sounds/paper-drop.wav','sounds/README.txt'
     )
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [IO.Compression.ZipFile]::OpenRead($ZipPath)
@@ -92,7 +93,7 @@ try {
         $resourceHashes[$relativeName] = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash
         if ($relativeName -eq 'Yourself Copilot.exe') { $sourcePath = Join-Path $projectRoot 'dist\Yourself-Copilot\Yourself Copilot.exe' }
         elseif ($relativeName -like '*.xaml') { $sourcePath = Join-Path $projectRoot ('src\' + $relativeName) }
-        elseif ($relativeName -like 'fonts/*' -or $relativeName -like 'icons/*' -or $relativeName -like 'illustrations/*') { $sourcePath = Join-Path $projectRoot ('assets\' + $relativeName) }
+        elseif ($relativeName -like 'fonts/*' -or $relativeName -like 'icons/*' -or $relativeName -like 'illustrations/*' -or $relativeName -like 'sounds/*') { $sourcePath = Join-Path $projectRoot ('assets\' + $relativeName) }
         else { continue }
         Assert-Package ($resourceHashes[$relativeName] -eq (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash) ('packaged runtime/resource bytes match the reviewed build: ' + $relativeName)
     }

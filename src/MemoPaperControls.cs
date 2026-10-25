@@ -20,6 +20,7 @@ namespace LocalDesktopNote
         internal FrameworkElement PaperSurface, PaperDecoration;
         internal bool IsPaperLifted { get { return lifted; } }
         internal FrameworkElement DragPreview { get { return preview; } }
+        internal Action PaperDropSound = MemoSounds.PlayDrop;
         private readonly Image binImage;
         private readonly WorkboardStore store;
         private readonly Func<bool> flush;
@@ -47,7 +48,7 @@ namespace LocalDesktopNote
             View.Children.Add(Grabber);
             var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             Grid.SetColumn(actions, 1); View.Children.Add(actions);
-            ArchiveButton = Button("archive", compact ? null : "收起", "收起这一页并换一张空白；可在历史记录中取回");
+            ArchiveButton = Button("archive", compact ? null : "存好换新", "存入“收起的纸页”，再换一张空白；可在历史记录中取回");
             ArchiveButton.Click += delegate { StorePaper("archive", null); };
             if (!compact) { ArchiveButton.Padding = new Thickness(10, 5, 10, 5); ArchiveButton.Margin = new Thickness(8, 0, 0, 0); }
             actions.Children.Add(ArchiveButton);
@@ -99,6 +100,12 @@ namespace LocalDesktopNote
             try
             {
                 if (!flush() || store.StoreCurrentMemo(kind, expectedText, expectedGeneration) == null) return false;
+                if (kind == "trash")
+                {
+                    // Feedback follows durable storage; audio is never allowed
+                    // to turn a completed save into an apparent failure.
+                    try { if (PaperDropSound != null) PaperDropSound(); } catch { }
+                }
                 report(kind == "trash" ? "这一页已放入纸篓 · Ctrl+Z 可取回" : "这一页已收好 · Ctrl+Z 可取回", false);
                 if (focus != null) View.Dispatcher.BeginInvoke(new Action(focus)); return true;
             }
@@ -168,8 +175,8 @@ namespace LocalDesktopNote
             RemoveSettlingPreview(); liftedText = store.State.Ideas; liftedGeneration = store.MemoPaperGeneration;
             var bitmap = new RenderTargetBitmap(Math.Max(1, (int)Math.Ceiling(PaperSurface.ActualWidth)), Math.Max(1, (int)Math.Ceiling(PaperSurface.ActualHeight)), 96, 96, PixelFormats.Pbgra32);
             bitmap.Render(PaperSurface); bitmap.Freeze();
-            double scale = Math.Min(0.84, Math.Min(Math.Min(520, dragHost.ActualWidth * 0.58) / PaperSurface.ActualWidth, Math.Min(420, dragHost.ActualHeight * 0.65) / PaperSurface.ActualHeight));
-            preview = new Border { Width = PaperSurface.ActualWidth * scale, Height = PaperSurface.ActualHeight * scale, Child = new Image { Source = bitmap, Stretch = Stretch.Fill }, IsHitTestVisible = false, Opacity = 0.96,
+            double scale = Math.Min(0.6, Math.Min(Math.Min(260, dragHost.ActualWidth * 0.32) / PaperSurface.ActualWidth, Math.Min(210, dragHost.ActualHeight * 0.32) / PaperSurface.ActualHeight));
+            preview = new Border { Width = PaperSurface.ActualWidth * scale, Height = PaperSurface.ActualHeight * scale, Child = new Image { Source = bitmap, Stretch = Stretch.Fill }, IsHitTestVisible = false, Opacity = 0.68,
                 Effect = new System.Windows.Media.Effects.DropShadowEffect { Color = Color.FromRgb(60, 72, 57), BlurRadius = 24, ShadowDepth = 12, Opacity = 0.24 }, RenderTransform = new RotateTransform(-3, PaperSurface.ActualWidth * scale / 2, 16) };
             surfaceOpacity = PaperSurface.Opacity; PaperSurface.Opacity = 0.12;
             if (PaperDecoration != null) { decorationOpacity = PaperDecoration.Opacity; PaperDecoration.Opacity = 0.1; }
@@ -197,8 +204,19 @@ namespace LocalDesktopNote
         {
             if (!lifted) return;
             if (!CurrentLift()) { CancelPaperLift(); return; }
-            Canvas.SetLeft(preview, point.X - preview.Width * 0.5); Canvas.SetTop(preview, point.Y - 16);
-            bool over = BinContains(point); Bin.Background = over ? Pale : Brushes.Transparent;
+            double left = Math.Max(8, Math.Min(dragHost.ActualWidth - preview.Width - 8, point.X - preview.Width - 24));
+            double top = Math.Max(8, Math.Min(dragHost.ActualHeight - preview.Height - 8, point.Y - preview.Height - 24));
+            Rect bin = Bin.TransformToAncestor(dragHost).TransformBounds(new Rect(Bin.RenderSize));
+            var occupied = new Rect(left, top, preview.Width, preview.Height); occupied.Inflate(16, 16);
+            if (occupied.IntersectsWith(bin))
+            {
+                // Leave the entire target visible, including the small rotated
+                // corners of the ghost. The pointer remains the drop anchor.
+                if (bin.Top - preview.Height - 24 >= 8) top = Math.Min(top, bin.Top - preview.Height - 24);
+                else if (bin.Left - preview.Width - 24 >= 8) left = Math.Min(left, bin.Left - preview.Width - 24);
+            }
+            Canvas.SetLeft(preview, left); Canvas.SetTop(preview, top);
+            bool over = BinContains(point); preview.Opacity = over ? 0.45 : 0.68; Bin.Background = over ? Pale : Brushes.Transparent;
             if (binImage != null) binImage.Effect = over ? new System.Windows.Media.Effects.DropShadowEffect { Color = Color.FromRgb(151, 184, 165), BlurRadius = 24, ShadowDepth = 0, Opacity = 0.7 } : null;
         }
         internal bool FinishPaperLift(Point point)
@@ -207,7 +225,7 @@ namespace LocalDesktopNote
             bool accepted = CurrentLift() && BinContains(point); string text = liftedText; long generation = liftedGeneration; Border paper = preview;
             ClearLift(false);
             if (!accepted || !StorePaper("trash", text, generation)) { dragLayer.Children.Remove(paper); return false; }
-            FeedBin(); SettlePaper(paper, point); return true;
+            FeedBin(); SettlePaper(paper); return true;
         }
         internal void CancelPaperLift() { ClearLift(true); }
         private void ClearLift(bool remove)
@@ -222,15 +240,15 @@ namespace LocalDesktopNote
             }
             Grabber.Opacity = 1; if (Grabber.IsMouseCaptured) Grabber.ReleaseMouseCapture(); ResetBin();
         }
-        private void SettlePaper(Border paper, Point point)
+        private void SettlePaper(Border paper)
         {
             if (!SystemParameters.ClientAreaAnimation) { dragLayer.Children.Remove(paper); return; }
             settlingPreview = paper;
             var scale = new ScaleTransform(1, 1, paper.Width / 2, paper.Height / 2); var translate = new TranslateTransform();
             var group = new TransformGroup(); group.Children.Add(scale); group.Children.Add(translate); paper.RenderTransform = group;
             var bounds = Bin.TransformToAncestor(dragHost).TransformBounds(new Rect(Bin.RenderSize)); var duration = TimeSpan.FromMilliseconds(190);
-            translate.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(bounds.Left + bounds.Width / 2 - point.X, duration));
-            translate.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(bounds.Top + Math.Min(40, bounds.Height / 2) - point.Y - paper.Height / 2 + 16, duration));
+            translate.BeginAnimation(TranslateTransform.XProperty, new DoubleAnimation(bounds.Left + bounds.Width / 2 - Canvas.GetLeft(paper) - paper.Width / 2, duration));
+            translate.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(bounds.Top + Math.Min(40, bounds.Height / 2) - Canvas.GetTop(paper) - paper.Height / 2, duration));
             scale.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.05, duration)); scale.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.05, duration));
             var fade = new DoubleAnimation(0, duration); fade.Completed += delegate { dragLayer.Children.Remove(paper); if (settlingPreview == paper) settlingPreview = null; }; paper.BeginAnimation(UIElement.OpacityProperty, fade);
         }

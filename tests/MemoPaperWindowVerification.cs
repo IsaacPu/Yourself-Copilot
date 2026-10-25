@@ -45,7 +45,7 @@ namespace LocalDesktopNote
             internal readonly WorkbenchWindow Bench;
             internal readonly string Original;
             internal readonly WorkTask Task, Removed;
-            internal int Saved;
+            internal int Saved, Sounds;
 
             internal Fixture(string name)
             {
@@ -62,6 +62,8 @@ namespace LocalDesktopNote
                 Store.UtcNowProvider = delegate { return new DateTime(2026, 10, 23, 8, 0, 0, DateTimeKind.Utc); };
                 Task = Store.State.Tasks.Single(); Removed = Store.State.Removed.Single();
                 Card = new WorkboardWindow(Store); Bench = new WorkbenchWindow(Store);
+                foreach (string surface in new[] { "card", "compact", "full" })
+                    Controls(surface).PaperDropSound = delegate { Sounds++; };
                 Store.Saved += delegate { Saved++; };
             }
             internal MemoPaperControls Controls(string surface)
@@ -109,6 +111,7 @@ namespace LocalDesktopNote
                 Check(f.Card.IdeasEditor.Text == text && f.Bench.IdeasEditor.Text == text, surface + " edit synchronizes both actual editors before storage");
                 Check(Field<bool>(surface == "card" ? (object)f.Card : f.Bench, "dirty"), surface + " starts with real queued TextChanged content");
                 Click(kind == "archive" ? controls.ArchiveButton : controls.TrashButton);
+                Check(f.Sounds == (kind == "trash" ? 1 : 0), surface + " " + kind + " click emits feedback only for a successfully binned paper");
                 Check(f.Store.State.Ideas == "" && f.Card.IdeasEditor.Text == "" && f.Bench.IdeasEditor.Text == "", surface + " " + kind + " click replaces both editors with a blank sheet");
                 Check(f.Persisted.Ideas == "" && f.Persisted.MemoPapers.Single().Text == text && f.Persisted.MemoPapers.Single().Kind == kind,
                     surface + " " + kind + " commits the latest actual editor text and blank state together");
@@ -119,6 +122,8 @@ namespace LocalDesktopNote
                 DisabledWhenBlank(f, surface);
                 int count = f.PaperCount;
                 Check(!controls.StorePaper(kind, null) && f.PaperCount == count, surface + " repeated activation on a blank sheet cannot duplicate a stored paper");
+                Click(controls.TrashButton);
+                Check(f.Sounds == (kind == "trash" ? 1 : 0), surface + " disabled blank-sheet trash action cannot replay the paper sound");
                 var reopened = new WorkboardStore(Path.GetDirectoryName(f.Store.PathName));
                 Check(reopened.State.Ideas == "" && reopened.State.MemoPapers.Single().Text == text, surface + " stored paper survives a fresh store load");
                 f.CheckTasks(surface + " " + kind);
@@ -183,6 +188,35 @@ namespace LocalDesktopNote
             return count;
         }
 
+        private static void PaperSoundFailures(string surface)
+        {
+            using (var f = new Fixture("sound-atomic-failure-" + surface))
+            {
+                f.Use(surface); var controls = f.Controls(surface);
+                Grid root = surface == "card" ? f.Card.View : f.Bench.View;
+                Layout(root, surface == "card" ? 410 : 1026, surface == "card" ? 600 : 800);
+                Point grip = Center(controls.Grabber, root), bin = Center(controls.Bin, root);
+                Check(controls.StartPaperLift(grip), surface + " begins an actual held session before testing drop persistence failure");
+                byte[] before = File.ReadAllBytes(f.Store.PathName);
+                Directory.CreateDirectory(f.Store.PathName + ".tmp");
+                try
+                {
+                    Check(!controls.FinishPaperLift(bin) && f.Store.State.Ideas == f.Original && f.PaperCount == 0
+                        && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)),
+                        surface + " a failed drop cannot clear the paper or claim storage success");
+                    Check(f.Sounds == 0 && !controls.IsPaperLifted && controls.DragPreview == null,
+                        surface + " failed drop remains silent and releases the held visual");
+                    Click(controls.TrashButton);
+                    Check(f.Sounds == 0 && f.Store.State.Ideas == f.Original && f.PaperCount == 0,
+                        surface + " a failed direct bin click also remains silent and retains current text");
+                }
+                finally { Directory.Delete(f.Store.PathName + ".tmp"); }
+                Check(controls.StartPaperLift(grip) && controls.FinishPaperLift(bin) && f.Sounds == 1,
+                    surface + " a recovered drop plays one sound only after storage succeeds");
+                f.CheckTasks(surface + " sound failure and retry");
+            }
+        }
+
         private static void DragBoundaries(string surface)
         {
             using (var f = new Fixture("drag-" + surface))
@@ -206,20 +240,36 @@ namespace LocalDesktopNote
                     surface + " shows a non-hit-testable paper visual while the paper is held");
                 Check(controls.PaperSurface.Opacity < restingOpacity && controls.DragPreview.ActualWidth > 30 && controls.DragPreview.ActualHeight > 30,
                     surface + " visibly lifts a substantial real paper instead of a cursor-only drag");
+                Check(controls.DragPreview.ActualWidth < 310 && controls.DragPreview.ActualHeight < 260
+                    && controls.DragPreview.ActualWidth < controls.PaperSurface.ActualWidth
+                    && controls.DragPreview.ActualHeight < controls.PaperSurface.ActualHeight,
+                    surface + " held paper is a compact thumbnail smaller than the source rather than another large sheet");
+                double heldOpacity = controls.DragPreview.Opacity;
+                Check(heldOpacity >= 0.35 && heldOpacity <= 0.8,
+                    surface + " held paper is translucent enough to see the destination through it while retaining visible content");
+                Point tracking = new Point(root.ActualWidth - 24, surface == "full" ? root.ActualHeight * 0.6 : root.ActualHeight - 36);
+                controls.MovePaperLift(tracking); root.UpdateLayout();
                 Point first = controls.DragPreview.TranslatePoint(new Point(), root);
-                controls.MovePaperLift(new Point(grip.X + 52, grip.Y + 43)); root.UpdateLayout();
+                controls.MovePaperLift(new Point(tracking.X - 36, tracking.Y + 28)); root.UpdateLayout();
                 Point second = controls.DragPreview.TranslatePoint(new Point(), root);
-                Check(Math.Abs((second.X - first.X) - 52) < 2 && Math.Abs((second.Y - first.Y) - 43) < 2,
+                Check(Math.Abs((second.X - first.X) + 36) < 2 && Math.Abs((second.Y - first.Y) - 28) < 2,
                     surface + " held paper follows the pointer displacement in both axes");
                 Snapshot(root, "memo-paper-lift-" + surface + ".png");
                 byte[] before = File.ReadAllBytes(f.Store.PathName);
-                controls.MovePaperLift(bin);
+                controls.MovePaperLift(bin); root.UpdateLayout();
+                Rect heldBounds = controls.DragPreview.TransformToAncestor(root).TransformBounds(new Rect(controls.DragPreview.RenderSize));
+                Check(!heldBounds.Contains(bin), surface + " held paper does not cover the bin center at its actual release destination");
+                Check(controls.DragPreview.Opacity < heldOpacity && controls.DragPreview.Opacity >= 0.25,
+                    surface + " approaching the bin makes the held paper lighter without hiding it completely");
+                Snapshot(root, "memo-paper-over-bin-" + surface + ".png");
                 Check(f.PaperCount == 0 && f.Store.State.Ideas == f.Original && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)), surface + " hovering above the bin never commits or clears a held paper");
+                Check(f.Sounds == 0, surface + " hovering over the bin never plays a success sound");
                 controls.CancelPaperLift(); root.UpdateLayout();
                 Check(!controls.IsPaperLifted && controls.DragPreview == null && controls.PaperSurface.Opacity == restingOpacity && controls.Bin.ToolTip == null,
                     surface + " cancel restores the stationary paper and removes the held visual and bin highlight");
                 Check(before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)) && f.PaperCount == 0 && f.Store.State.Ideas == f.Original,
                     surface + " cancelled lift preserves exact disk bytes and original content");
+                Check(f.Sounds == 0, surface + " cancelling a held paper is silent");
                 Check(controls.StartPaperLift(grip) && !controls.FinishPaperLift(new Point(-20, -20)) && !controls.IsPaperLifted,
                     surface + " releasing outside the application restores the original sheet without storing it");
                 Check(before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)) && f.PaperCount == 0, surface + " outside release creates no hidden history paper");
@@ -230,8 +280,10 @@ namespace LocalDesktopNote
                 bool restarted = controls.StartPaperLift(grip);
                 Check(restarted && controls.FinishPaperLift(bin) && !controls.IsPaperLifted && f.Persisted.Ideas == "", surface + " releasing the current held paper inside the bin commits a blank sheet");
                 Check(f.Persisted.MemoPapers.Single().Kind == "trash" && f.Persisted.MemoPapers.Single().Text == updated, surface + " valid release stores exactly the accepted whole paper in the bin");
+                Check(f.Sounds == 1, surface + " one successful internal drop emits exactly one paper sound");
                 Check(f.Card.IdeasEditor.Text == "" && f.Bench.IdeasEditor.Text == "", surface + " valid release replaces both real editor controls");
                 Check(!controls.FinishPaperLift(bin) && f.PaperCount == 1 && !controls.StartPaperLift(grip), surface + " a duplicate release or lift of the blank replacement cannot store another paper");
+                Check(f.Sounds == 1, surface + " duplicate release cannot emit another success sound");
                 f.CheckTasks(surface + " drop");
             }
         }
@@ -381,6 +433,13 @@ namespace LocalDesktopNote
             {
                 f.Bench.IdeasEditor.Text = "做一个更安静的专注计时器，让开始变得更简单。\r\n为阅读场景设计一个轻量的摘录工具。\r\n整理一下最近的旅行照片，写一篇短游记。\r\n尝试用传感器数据记录睡眠，看看规律。";
                 f.Navigate("memo");
+                var full = f.Controls("full");
+                var archiveContent = full.ArchiveButton.Content as StackPanel;
+                Check(archiveContent != null && archiveContent.Children.OfType<TextBlock>().Any(t => t.Text == "存好换新"),
+                    "full paper names the archive action explicitly instead of the ambiguous store-away label");
+                foreach (string surface in new[] { "card", "compact", "full" })
+                    Check(Convert.ToString(f.Controls(surface).ArchiveButton.ToolTip).Contains("收起的纸页"),
+                        surface + " archive help identifies the saved-paper destination before creating a blank sheet");
                 foreach (Size size in new[] { new Size(1026, 800), new Size(800, 600) })
                 {
                     Layout(f.Bench.View, size.Width, size.Height);
@@ -413,6 +472,7 @@ namespace LocalDesktopNote
                     Run(current + " persisted storage failure", delegate { FailedStorage(current, false); });
                     Run(current + " unsaved flush failure", delegate { FailedStorage(current, true); });
                     Run(current + " routed drag boundaries", delegate { DragBoundaries(current); });
+                    Run(current + " success-only paper sound", delegate { PaperSoundFailures(current); });
                     Run(current + " same-text sheet drag boundaries", delegate { SameTextReplacementInvalidatesDrag(current); });
                     Run(current + " local and shared keyboard history", delegate { KeyboardHistory(current); });
                     Run(current + " lost capture resize and hidden grip", delegate { LiftCancellationRoutes(current); });
@@ -420,7 +480,7 @@ namespace LocalDesktopNote
                 Run("history recovery and native snapshots", HistoryRestoreAndSnapshots);
                 Run("selected concept and responsive paper", ReferenceVisual);
                 Report.AppendLine("Passed: " + passed + "; Failed: " + failed);
-                Report.AppendLine("LIMIT: isolated production WinForms/WPF constructors, TextChanged, routed Button.Click and LostMouseCapture, shared pointer-controller methods used by actual handlers, local TextBox Undo/Redo and shared keyboard controller, real host resizing, primary IO failures, fresh store loading, and hidden native WPF rendering. Handler inspection verifies only the grip owns whole-paper drag source handlers. No Show/Attach, physical pointer capture or native keyboard-focus automation, production data, registry or production process changes.");
+                Report.AppendLine("LIMIT: isolated production WinForms/WPF constructors, TextChanged, routed Button.Click and LostMouseCapture, shared pointer-controller methods used by actual handlers, local TextBox Undo/Redo and shared keyboard controller, real host resizing, primary IO failures, fresh store loading, and hidden native WPF rendering. Paper sounds are replaced by counters to verify success-only dispatch without audible playback. Handler inspection verifies only the grip owns whole-paper drag source handlers. No Show/Attach, physical pointer capture, audible-output or native keyboard-focus automation, production data, registry or production process changes.");
                 return failed == 0 ? 0 : 1;
             }
             finally { File.WriteAllText(Path.Combine(Storage.Folder, "verification-memo-paper-window.txt"), Report.ToString(), new UTF8Encoding(false)); }

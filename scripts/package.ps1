@@ -22,7 +22,7 @@ New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
 foreach ($name in @('Yourself Copilot.exe','WorkboardView.xaml','CompactWindow.xaml')) {
     Copy-Item -LiteralPath (Join-Path $runtimeRoot $name) -Destination $payloadRoot
 }
-foreach ($name in @('fonts','icons','illustrations')) {
+foreach ($name in @('fonts','icons','illustrations','sounds')) {
     $assetRoot = Join-Path $projectRoot ('assets\' + $name)
     $links = @(Get-ChildItem -LiteralPath $assetRoot -Recurse -Force | Where-Object {
         ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0

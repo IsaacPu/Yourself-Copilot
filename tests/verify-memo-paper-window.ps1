@@ -11,7 +11,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'MemoPaperWindowVerification.cs'
 foreach ($file in @('WorkboardView.xaml','CompactWindow.xaml')) {
     Copy-Item -LiteralPath (Join-Path $sourceDirectoryPath $file) -Destination $testPath
 }
-foreach ($directory in @('fonts','icons','illustrations')) {
+foreach ($directory in @('fonts','icons','illustrations','sounds')) {
     Copy-Item -LiteralPath (Join-Path $projectPath ('assets\' + $directory)) -Destination $testPath -Recurse
 }
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
