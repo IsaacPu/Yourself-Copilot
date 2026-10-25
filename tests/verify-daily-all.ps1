@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 & (Join-Path $PSScriptRoot 'verify-memo-paper-store.ps1')
 & (Join-Path $PSScriptRoot 'verify-memo-paper-window.ps1')
 & (Join-Path $PSScriptRoot 'verify-history-panel.ps1')
+& (Join-Path $PSScriptRoot 'verify-history-archive.ps1')
 & (Join-Path $PSScriptRoot 'verify-memo-layout.ps1')
 & (Join-Path $PSScriptRoot 'verify-startup.ps1')
 & (Join-Path $PSScriptRoot 'verify-workbench.ps1')

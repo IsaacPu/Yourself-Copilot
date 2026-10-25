@@ -32,7 +32,8 @@ namespace LocalDesktopNote
         internal readonly List<CheckBox> CompletedChecks = new List<CheckBox>();
         internal readonly Dictionary<string, Button> ScopeButtons = new Dictionary<string, Button>();
         internal readonly ListBox HistoryList;
-        internal readonly TextBox HistoryPreview;
+        internal readonly RichTextBox HistoryPreview;
+        internal readonly TextBox MemoTitleEditor;
         internal readonly CheckBox LaunchAtLoginCheck, StartupCardCheck;
         internal Action OpenPictures, ShowDesktopCard;
         internal Func<bool> GetAutoStart;
@@ -43,7 +44,7 @@ namespace LocalDesktopNote
         private readonly Forms.Timer saveTimer;
         private readonly Grid content;
         private readonly StackPanel taskRows, completedRows;
-        private readonly TextBlock status, taskSummary, taskEmpty, historyNotice, settingsNotice;
+        private readonly TextBlock status, taskSummary, taskEmpty, settingsNotice;
         private readonly Button undoButton;
         private readonly Border compactMemoHost, fullMemoHost;
         private readonly MemoSplitLayout memoSplit;
@@ -187,6 +188,13 @@ namespace LocalDesktopNote
             fullPaperControls.View.Children.Remove(fullPaperControls.Grabber);
             ((Panel)fullPaperControls.Bin.Parent).Children.Remove(fullPaperControls.Bin);
             fullPaperControls.View.Margin = new Thickness(0, 0, 0, 24); fullPaper.Children.Add(fullPaperControls.View);
+            var titleHost = new Grid { Width = 222, HorizontalAlignment = HorizontalAlignment.Right };
+            MemoTitleEditor = new TextBox { MaxLength = WorkboardStore.MemoTitleLimit, FontFamily = AppTypography.Body, FontSize = 12.5, Foreground = ink, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Padding = new Thickness(4, 4, 0, 4), TextAlignment = TextAlignment.Right, ToolTip = "这篇随手记的标题，自动保存在本机" };
+            MemoTitleEditor.Style = (Style)System.Windows.Markup.XamlReader.Parse(@"<Style xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' TargetType='TextBox'><Setter Property='Opacity' Value='0.6'/><Style.Triggers><Trigger Property='IsKeyboardFocusWithin' Value='True'><Setter Property='Opacity' Value='1'/></Trigger></Style.Triggers></Style>");
+            AutomationProperties.SetName(MemoTitleEditor, "当前随手记标题"); titleHost.Children.Add(MemoTitleEditor);
+            var titleHint = new TextBlock { Text = "给这篇随手记起个标题", FontSize = 12.5, Foreground = ink, Opacity = 0.6, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+            titleHost.Children.Add(titleHint); Grid.SetColumnSpan(titleHost, 2); fullPaperControls.View.Children.Add(titleHost);
+            MemoTitleEditor.TextChanged += delegate { titleHint.Visibility = MemoTitleEditor.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; };
             fullMemoHost = new Border { Background = Brushes.Transparent, Margin = new Thickness(4, 0, 6, 42) }; Grid.SetRow(fullMemoHost, 1); fullPaper.Children.Add(fullMemoHost);
             fullMemoHint = new TextBlock { Text = "写下此刻想到的，不用整理。", Foreground = Brush("#9AA195"), FontFamily = AppTypography.Body, FontSize = 18, Margin = new Thickness(4, 4, 0, 0), IsHitTestVisible = false };
             Grid.SetRow(fullMemoHint, 1); fullPaper.Children.Add(fullMemoHint);
@@ -210,14 +218,14 @@ namespace LocalDesktopNote
             var fullConversion = new MenuItem { Header = "整段建为今日任务" }; fullConversion.Click += delegate { ConvertMemo(false); }; convertMenu.Items.Add(fullConversion);
             convertButton.Click += delegate { convertMenu.PlacementTarget = convertButton; convertMenu.IsOpen = true; };
             DockPanel.SetDock(convertButton, System.Windows.Controls.Dock.Right); convertButton.Margin = new Thickness(0, 0, 126, 0); paperFooter.Children.Add(convertButton);
-            var storedLink = MakeButton("看看收起的纸页", delegate { OpenPaperHistory("archive"); }); storedLink.HorizontalAlignment = HorizontalAlignment.Left; storedLink.Foreground = muted; paperFooter.Children.Add(storedLink);
+            var storedLink = MakeButton("看看旧纸页", delegate { OpenPaperHistory("papers"); }); storedLink.HorizontalAlignment = HorizontalAlignment.Left; storedLink.Foreground = muted; paperFooter.Children.Add(storedLink);
             Grid.SetRow(paperFooter, 2); memo.Children.Add(paperFooter);
             compactMemoHost.Child = IdeasEditor;
 
-            var history = NewPage("history", "留在这里的文字", "随手记与任务分开保存和查找。旧纸可以取回，任务历史只读查看。");
+            var history = NewPage("history", "历史记录", "");
             history.RowDefinitions.Add(new RowDefinition());
             historyPanel = new HistoryPanel(Store, OpenMemoFromHistory);
-            HistoryList = historyPanel.List; HistoryPreview = historyPanel.Preview; historyNotice = historyPanel.Notice;
+            HistoryList = historyPanel.List; HistoryPreview = historyPanel.Preview;
             Grid.SetRow(historyPanel.View, 1); history.Children.Add(historyPanel.View);
 
             var settings = NewPage("settings", "按你的习惯出现", "桌面卡片、工作台与图片管理共用本机内容。");
@@ -236,6 +244,9 @@ namespace LocalDesktopNote
             NewTaskEditor.TextChanged += delegate { newTaskPlaceholder.Visibility = NewTaskEditor.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed; };
             NewTaskEditor.TextChanged += delegate { if (!loading) { Store.State.TaskDraft = NewTaskEditor.Text; if (String.IsNullOrWhiteSpace(NewTaskEditor.Text)) { Store.State.DraftPlanDate = null; RefreshDraftDate(); } else if (Store.State.DraftPlanDate == null) Store.State.DraftPlanDate = UnplannedCheck.IsChecked == true ? "" : WorkboardStore.FormatPlanDate(DraftDatePicker.SelectedDate); QueueSave(); } };
             IdeasEditor.TextChanged += delegate { UpdateMemoHints(); if (!loading) { Store.State.Ideas = IdeasEditor.Text; lastMemoConvertedAt = DateTime.MinValue; QueueSave(); } };
+            MemoTitleEditor.TextChanged += delegate { if (!loading) { Store.State.MemoTitle = WorkboardStore.NormalizeMemoTitle(MemoTitleEditor.Text); QueueSave(); } };
+            MemoTitleEditor.LostKeyboardFocus += delegate { if (!loading) Flush(); };
+            MemoTitleEditor.PreviewKeyDown += delegate(object sender, KeyEventArgs e) { if (e.Key == Key.Enter) { Flush(); IdeasEditor.Focus(); e.Handled = true; } };
             NewTaskEditor.PreviewKeyDown += delegate(object sender, KeyEventArgs e) { if (e.Key == Key.Enter) { AddDraft(); e.Handled = true; } };
             DraftDatePicker.SelectedDateChanged += delegate { if (!loading) { if (DraftDatePicker.SelectedDate.HasValue) UnplannedCheck.IsChecked = false; UpdateDraftDate(); } };
             DraftDatePicker.DateValidationError += delegate(object sender, DatePickerDateValidationErrorEventArgs e) { e.ThrowException = false; ShowStatus("日期无法识别，请从日历选择日期，或勾选“未安排”。", true); };
@@ -249,7 +260,7 @@ namespace LocalDesktopNote
             View.PreviewKeyDown += delegate(object sender, KeyEventArgs e)
             {
                 if (e.Key == Key.Escape) { compactPaperControls.CancelPaperLift(); fullPaperControls.CancelPaperLift(); }
-                if (fullPaperControls.HandleHistoryKey(e.Key, Keyboard.Modifiers, IdeasEditor.IsKeyboardFocusWithin ? IdeasEditor : null, page == "memo" || IdeasEditor.IsKeyboardFocusWithin || compactPaperControls.View.IsKeyboardFocusWithin)) { e.Handled = true; return; }
+                if (!MemoTitleEditor.IsKeyboardFocusWithin && fullPaperControls.HandleHistoryKey(e.Key, Keyboard.Modifiers, IdeasEditor.IsKeyboardFocusWithin ? IdeasEditor : null, page == "memo" || IdeasEditor.IsKeyboardFocusWithin || compactPaperControls.View.IsKeyboardFocusWithin)) { e.Handled = true; return; }
                 if (e.Key == Key.S && (Keyboard.Modifiers & System.Windows.Input.ModifierKeys.Control) != 0) { FinishMemoHistory(); e.Handled = true; }
             };
             Store.Changed += StoreChanged;
@@ -287,7 +298,7 @@ namespace LocalDesktopNote
         {
             var grid = new Grid { Visibility = Visibility.Collapsed };
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var heading = new StackPanel { Margin = new Thickness(0, 0, 0, key == "memo" ? 10 : 24) };
+            var heading = new StackPanel { Margin = new Thickness(0, 0, 0, key == "memo" || key == "history" ? 10 : 24) };
             if (key == "tasks" || key == "memo")
             {
                 var line = new StackPanel { Orientation = Orientation.Horizontal };
@@ -299,8 +310,8 @@ namespace LocalDesktopNote
             }
             else
             {
-                heading.Children.Add(new TextBlock { Text = title, FontSize = 26, FontWeight = FontWeights.Medium, Margin = new Thickness(0, 0, 0, 9) });
-                heading.Children.Add(new TextBlock { Text = subtitle, Foreground = muted, FontSize = 12, TextWrapping = TextWrapping.Wrap, LineHeight = 20 });
+                heading.Children.Add(new TextBlock { Text = title, FontSize = key == "history" ? 30 : 26, FontWeight = FontWeights.Medium, Margin = new Thickness(0, 0, 0, key == "history" ? 0 : 9) });
+                if (!String.IsNullOrEmpty(subtitle)) heading.Children.Add(new TextBlock { Text = subtitle, Foreground = muted, FontSize = 12, TextWrapping = TextWrapping.Wrap, LineHeight = 20 });
             }
             grid.Children.Add(heading); pages.Add(key, grid); content.Children.Add(grid); return grid;
         }
@@ -707,7 +718,7 @@ namespace LocalDesktopNote
         {
             if (disposed) return;
             saveTimer.Stop(); loading = true;
-            try { MemoPaperControls.ReplaceEditorText(IdeasEditor, Store.State.Ideas); }
+            try { MemoPaperControls.ReplaceEditorText(IdeasEditor, Store.State.Ideas); MemoPaperControls.ReplaceEditorText(MemoTitleEditor, Store.State.MemoTitle ?? ""); }
             finally { loading = false; }
             dirty = viewDirty = saveFailed = false; saveFailureMessage = null;
             UpdateMemoHints();
@@ -719,10 +730,10 @@ namespace LocalDesktopNote
             Navigate("history");
             if (page == "history") historyPanel.SelectCategory("memo", filter);
         }
-        internal bool OpenMemoFromHistory(string text)
+        internal bool OpenMemoFromHistory(string text, string title = null)
         {
             if (!Flush()) return false;
-            if (!Store.OpenMemoText(text)) return false;
+            if (!Store.OpenMemoText(text, title)) return false;
             Navigate("memo");
             ShowSavedAction("已取回这页；之前正在写的内容也已收好。");
             FocusMemoEditor(); return true;
@@ -742,6 +753,7 @@ namespace LocalDesktopNote
             try
             {
                 if (!IdeasEditor.IsKeyboardFocusWithin && IdeasEditor.Text != Store.State.Ideas) MemoPaperControls.ReplaceEditorText(IdeasEditor, Store.State.Ideas);
+                if (!MemoTitleEditor.IsKeyboardFocusWithin && MemoTitleEditor.Text != (Store.State.MemoTitle ?? "")) MemoPaperControls.ReplaceEditorText(MemoTitleEditor, Store.State.MemoTitle ?? "");
                 if (!NewTaskEditor.IsKeyboardFocusWithin && NewTaskEditor.Text != Store.State.TaskDraft) NewTaskEditor.Text = Store.State.TaskDraft;
                 if (!DraftDatePicker.IsKeyboardFocusWithin && !UnplannedCheck.IsKeyboardFocusWithin)
                 {
@@ -759,10 +771,6 @@ namespace LocalDesktopNote
         private void LoadHistory()
         {
             historyPanel.Load();
-        }
-        private void ShowHistorySelection()
-        {
-            historyPanel.ShowSelection();
         }
         private void RefreshSettings()
         {

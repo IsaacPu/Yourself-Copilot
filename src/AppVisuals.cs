@@ -21,7 +21,8 @@ namespace LocalDesktopNote
             { "settings", "settings" }, { "images", "image_multiple" }, { "plus", "add" },
             { "more", "more_horizontal" }, { "expand", "arrow_expand" },
             { "calendar", "calendar_ltr" }, { "remove", "dismiss" },
-            { "archive", "archive" }, { "trash", "delete" }
+            { "trash", "delete" },
+            { "history-done", "checkmark_circle" }, { "history-pending", "circle" }, { "copy", "copy" }
         };
         private static readonly Dictionary<string, Geometry> Cache = new Dictionary<string, Geometry>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, ImageSource> IllustrationCache = new Dictionary<string, ImageSource>(StringComparer.OrdinalIgnoreCase);
@@ -39,7 +40,8 @@ namespace LocalDesktopNote
             { "tasks", "任务" }, { "note", "备忘" }, { "history", "历史" }, { "settings", "设置" },
             { "images", "图片" }, { "plus", "添加" }, { "more", "更多" }, { "expand", "展开" },
             { "calendar", "日期" }, { "remove", "移除" },
-            { "archive", "收起" }, { "trash", "纸篓" }
+            { "trash", "纸篓" },
+            { "history-done", "已完成" }, { "history-pending", "待办" }, { "copy", "复制" }
         };
 
         internal static ImageSource IconSource(string name, Brush foreground)
@@ -183,7 +185,8 @@ namespace LocalDesktopNote
                 {
                     string file;
                     if (!Files.TryGetValue(name, out file)) throw new ArgumentException("未知图标名称：" + name);
-                    string path = System.IO.Path.Combine(Storage.Folder, "icons", "svg", "ic_fluent_" + file + "_24_regular.svg");
+                    string variant = name == "history-done" ? "filled" : "regular";
+                    string path = System.IO.Path.Combine(Storage.Folder, "icons", "svg", "ic_fluent_" + file + "_24_" + variant + ".svg");
                     var settings = new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null };
                     var document = new XmlDocument { XmlResolver = null };
                     using (var reader = XmlReader.Create(path, settings)) document.Load(reader);

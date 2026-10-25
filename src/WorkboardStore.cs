@@ -24,6 +24,8 @@ namespace LocalDesktopNote
     {
         [DataMember] public int Version = 1;
         [DataMember] public string Ideas = "";
+        [DataMember(EmitDefaultValue = false)] public string MemoTitle;
+        [DataMember(EmitDefaultValue = false)] public Dictionary<string, string> MemoHistoryTitles;
         [DataMember] public string TaskDraft = "";
         [DataMember] public List<WorkTask> Tasks = new List<WorkTask>();
         [DataMember] public List<WorkTask> Removed = new List<WorkTask>();
@@ -66,8 +68,9 @@ namespace LocalDesktopNote
 
         private sealed class MemoPaperChange
         {
-            internal readonly string Before, After;
-            internal MemoPaperChange(string before, string after) { Before = before; After = after; }
+            internal readonly string Before, After, BeforeTitle, AfterTitle;
+            internal MemoPaperChange(string before, string after, string beforeTitle, string afterTitle)
+            { Before = before; After = after; BeforeTitle = beforeTitle; AfterTitle = afterTitle; }
         }
         private bool preserveBackup;
         private bool notifying;
@@ -251,23 +254,26 @@ namespace LocalDesktopNote
                 throw new InvalidOperationException("随手记已发生变化，请按当前内容重新操作。");
             if (String.IsNullOrWhiteSpace(current)) return null;
             var paper = NewMemoPaper(current, kind);
-            ReplaceMemo("", paper, delegate { RecordMemoChange(current, ""); });
+            string title = State.MemoTitle;
+            ReplaceMemo("", null, paper, delegate { RecordMemoChange(current, "", title, null); });
             return paper;
         }
 
-        internal bool OpenMemoText(string text)
+        internal bool OpenMemoText(string text, string title = null)
         {
             text = text ?? "";
+            title = NormalizeMemoTitle(title);
             string current = State.Ideas ?? "";
-            if (String.Equals(current, text, StringComparison.Ordinal)) return false;
-            ReplaceMemo(text, String.IsNullOrWhiteSpace(current) ? null : NewMemoPaper(current, "archive"),
-                delegate { RecordMemoChange(current, text); });
+            string currentTitle = State.MemoTitle;
+            if (String.Equals(current, text, StringComparison.Ordinal) && NormalizeMemoTitle(currentTitle) == title) return false;
+            ReplaceMemo(text, title, String.IsNullOrWhiteSpace(current) ? null : NewMemoPaper(current, "archive"),
+                delegate { RecordMemoChange(current, text, currentTitle, title); });
             return true;
         }
 
-        private void RecordMemoChange(string before, string after)
+        private void RecordMemoChange(string before, string after, string beforeTitle, string afterTitle)
         {
-            memoUndo.Push(new MemoPaperChange(before, after));
+            memoUndo.Push(new MemoPaperChange(before, after, beforeTitle, afterTitle));
             memoRedo.Clear();
         }
 
@@ -282,17 +288,22 @@ namespace LocalDesktopNote
             MemoPaperChange change = from.Peek();
             string expected = redo ? change.Before : change.After;
             string target = redo ? change.After : change.Before;
+            string expectedTitle = redo ? change.BeforeTitle : change.AfterTitle;
+            string targetTitle = redo ? change.AfterTitle : change.BeforeTitle;
             string current = State.Ideas ?? "";
+            string currentTitle = State.MemoTitle;
             // Typing since the paper action is a separate editor buffer. Keep it
             // as an archive before replaying the paper action, never overwrite it.
-            MemoPaper protection = !String.IsNullOrWhiteSpace(current) && current != expected && current != target
+            MemoPaper protection = !String.IsNullOrWhiteSpace(current) &&
+                (current != expected || NormalizeMemoTitle(currentTitle) != NormalizeMemoTitle(expectedTitle)) &&
+                (current != target || NormalizeMemoTitle(currentTitle) != NormalizeMemoTitle(targetTitle))
                 ? NewMemoPaper(current, "archive") : null;
-            ReplaceMemo(target, protection, delegate
+            ReplaceMemo(target, targetTitle, protection, delegate
             {
                 from.Pop();
                 // A reverse command returns to the actual page we just left,
                 // including any writing since the original paper action.
-                to.Push(redo ? new MemoPaperChange(current, target) : new MemoPaperChange(target, current));
+                to.Push(redo ? new MemoPaperChange(current, target, currentTitle, targetTitle) : new MemoPaperChange(target, current, targetTitle, currentTitle));
             });
             return true;
         }
@@ -300,12 +311,13 @@ namespace LocalDesktopNote
         private MemoPaper NewMemoPaper(string text, string kind)
         {
             return new MemoPaper { Id = Guid.NewGuid().ToString("N"), Text = text,
-                StoredAtUtc = UtcNowProvider().ToUniversalTime().ToString("o", CultureInfo.InvariantCulture), Kind = kind };
+                StoredAtUtc = UtcNowProvider().ToUniversalTime().ToString("o", CultureInfo.InvariantCulture), Kind = kind, Title = NormalizeMemoTitle(State.MemoTitle) };
         }
 
-        private void ReplaceMemo(string text, MemoPaper paper, Action historyCommitted)
+        private void ReplaceMemo(string text, string title, MemoPaper paper, Action historyCommitted)
         {
             string previousText = State.Ideas;
+            string previousTitle = State.MemoTitle;
             List<MemoPaper> previousPapers = State.MemoPapers;
             if (paper != null)
             {
@@ -313,6 +325,7 @@ namespace LocalDesktopNote
                 State.MemoPapers.Add(paper);
             }
             State.Ideas = text;
+            State.MemoTitle = NormalizeMemoTitle(title);
             bool committed = false;
             try
             {
@@ -332,6 +345,7 @@ namespace LocalDesktopNote
                 if (!committed)
                 {
                     State.Ideas = previousText;
+                    State.MemoTitle = previousTitle;
                     State.MemoPapers = previousPapers;
                     throw;
                 }
@@ -340,6 +354,55 @@ namespace LocalDesktopNote
                 Notice = "内容已保存，部分界面未及时刷新；重新打开窗口后可查看。";
             }
             NotifyHandlers(MemoReplaced);
+        }
+
+        internal const int MemoTitleLimit = 80;
+        internal static string NormalizeMemoTitle(string title)
+        {
+            string value = (title ?? "").Replace('\r', ' ').Replace('\n', ' ').Trim();
+            if (value.Length == 0) return null;
+            int length = Math.Min(value.Length, MemoTitleLimit);
+            if (length < value.Length && Char.IsHighSurrogate(value[length - 1])) length--;
+            return value.Substring(0, length);
+        }
+
+        private string HistoryTitleKey(string path)
+        {
+            string root = Path.GetFullPath(HistoryFolder).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            string fullPath = Path.GetFullPath(path);
+            if (!fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase)) throw new ArgumentException("请选择本机历史记录。", "path");
+            return fullPath.Substring(root.Length).Replace('\\', '/');
+        }
+
+        internal string HistoryMemoTitle(string path, string fallback)
+        {
+            string title;
+            return State.MemoHistoryTitles != null && State.MemoHistoryTitles.TryGetValue(HistoryTitleKey(path), out title) ? NormalizeMemoTitle(title) : NormalizeMemoTitle(fallback);
+        }
+
+        // Rename metadata belongs to the primary state. Original snapshots and
+        // their timestamps remain untouched, including for legacy records.
+        internal bool RenameMemo(string paperId, string snapshotPath, string title)
+        {
+            title = NormalizeMemoTitle(title);
+            MemoPaper paper = snapshotPath == null ? (State.MemoPapers ?? new List<MemoPaper>()).FirstOrDefault(value => value != null && value.Id == paperId) : null;
+            if (snapshotPath == null && paper == null) return false;
+            if (snapshotPath != null) ReadHistorySnapshot(snapshotPath);
+            string previousTitle = paper == null ? null : paper.Title;
+            var previousTitles = State.MemoHistoryTitles;
+            if (paper != null) paper.Title = title;
+            else
+            {
+                State.MemoHistoryTitles = previousTitles == null ? new Dictionary<string, string>() : new Dictionary<string, string>(previousTitles);
+                State.MemoHistoryTitles[HistoryTitleKey(snapshotPath)] = title;
+            }
+            bool committed = false;
+            try { Save(delegate { committed = true; }); }
+            catch
+            {
+                if (!committed) { if (paper != null) paper.Title = previousTitle; State.MemoHistoryTitles = previousTitles; throw; }
+            }
+            return true;
         }
 
         internal void Save()
@@ -561,8 +624,9 @@ namespace LocalDesktopNote
                 snapshot = (WorkboardState)new DataContractJsonSerializer(typeof(WorkboardState)).ReadObject(buffer);
             // The primary file owns stored papers. Repeating the entire paper
             // collection in every recovery snapshot would grow quadratically.
-            if (snapshot.MemoPapers == null && String.IsNullOrEmpty(snapshot.TaskDraft) && snapshot.DraftPlanDate == null) return bytes;
+            if (snapshot.MemoPapers == null && snapshot.MemoHistoryTitles == null && String.IsNullOrEmpty(snapshot.TaskDraft) && snapshot.DraftPlanDate == null) return bytes;
             snapshot.MemoPapers = null;
+            snapshot.MemoHistoryTitles = null;
             snapshot.TaskDraft = "";
             snapshot.DraftPlanDate = null;
             using (var buffer = new MemoryStream())

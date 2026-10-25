@@ -96,12 +96,12 @@ namespace LocalDesktopNote
             foreach (string surface in new[] { "card", "compact", "full" })
             {
                 var controls = f.Controls(surface);
-                Check(!controls.Grabber.IsEnabled && !controls.ArchiveButton.IsEnabled && !controls.TrashButton.IsEnabled,
+                Check(!controls.Grabber.IsEnabled && !controls.TrashButton.IsEnabled,
                     label + " disables empty-sheet actions on " + surface);
             }
         }
 
-        private static void ClickStore(string surface, string kind)
+        private static void StoreAndBlank(string surface, string kind)
         {
             using (var f = new Fixture(surface + "-" + kind))
             {
@@ -110,7 +110,7 @@ namespace LocalDesktopNote
                 f.Editor(surface).Text = text;
                 Check(f.Card.IdeasEditor.Text == text && f.Bench.IdeasEditor.Text == text, surface + " edit synchronizes both actual editors before storage");
                 Check(Field<bool>(surface == "card" ? (object)f.Card : f.Bench, "dirty"), surface + " starts with real queued TextChanged content");
-                Click(kind == "archive" ? controls.ArchiveButton : controls.TrashButton);
+                if (kind == "archive") controls.StorePaper(kind, null); else Click(controls.TrashButton);
                 Check(f.Sounds == (kind == "trash" ? 1 : 0), surface + " " + kind + " click emits feedback only for a successfully binned paper");
                 Check(f.Store.State.Ideas == "" && f.Card.IdeasEditor.Text == "" && f.Bench.IdeasEditor.Text == "", surface + " " + kind + " click replaces both editors with a blank sheet");
                 Check(f.Persisted.Ideas == "" && f.Persisted.MemoPapers.Single().Text == text && f.Persisted.MemoPapers.Single().Kind == kind,
@@ -144,7 +144,7 @@ namespace LocalDesktopNote
                 Check(f.PaperCount == 2 && f.Persisted.MemoPapers.Any(p => p.Kind == "archive" && p.Text == interim), surface + " undo first stores intervening unsaved content safely");
                 Check(f.Persisted.MemoPapers.Any(p => p.Kind == "trash" && p.Text == f.Original), surface + " undo retains the original recovery paper");
                 Check(!f.Store.CanUndoMemoPaper && f.Store.CanRedoMemoPaper && !controls.Undo(), surface + " completed undo advances the shared stack and enables redo");
-                Check(f.Controls("card").ArchiveButton.IsEnabled && f.Controls("full").TrashButton.IsEnabled, surface + " nonempty restored content re-enables sheet actions");
+                Check(f.Controls("card").TrashButton.IsEnabled && f.Controls("full").TrashButton.IsEnabled, surface + " nonempty restored content re-enables sheet actions");
                 f.CheckTasks(surface + " undo");
             }
         }
@@ -160,15 +160,15 @@ namespace LocalDesktopNote
                 Directory.CreateDirectory(f.Store.PathName + ".tmp");
                 try
                 {
-                    Click(controls.ArchiveButton);
+                    Click(controls.TrashButton);
                     Check(f.Store.State.Ideas == current && f.Card.IdeasEditor.Text == current && f.Bench.IdeasEditor.Text == current,
                         surface + " failed " + (unsaved ? "flush" : "atomic storage") + " keeps the exact original text in both editors");
                     Check(count == f.PaperCount && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)), surface + " failed storage leaves the paper collection and primary bytes unchanged");
-                    Check(!f.Store.CanUndoMemoPaper && !f.Store.CanRedoMemoPaper && controls.ArchiveButton.IsEnabled, surface + " failed storage leaves no false undo or redo and remains retryable");
+                    Check(!f.Store.CanUndoMemoPaper && !f.Store.CanRedoMemoPaper && controls.TrashButton.IsEnabled, surface + " failed storage leaves no false undo or redo and remains retryable");
                     Check(f.Status(surface).Contains("失败") || f.Status(surface).Contains("没有换页"), surface + " failed storage exposes a visible retry message");
                 }
                 finally { Directory.Delete(f.Store.PathName + ".tmp"); }
-                Click(controls.ArchiveButton);
+                Click(controls.TrashButton);
                 Check(f.Persisted.Ideas == "" && f.Persisted.MemoPapers.Single().Text == current, surface + " successful retry preserves the same content exactly once");
             }
         }
@@ -297,9 +297,9 @@ namespace LocalDesktopNote
                 Layout(root, surface == "card" ? 410 : 1026, surface == "card" ? 600 : 800);
                 Point grip = Center(controls.Grabber, root), bin = Center(controls.Bin, root);
                 Check(controls.StartPaperLift(grip), surface + " starts a real held-sheet session before same-text replacement");
-                Click(controls.ArchiveButton); controls.Undo();
+                Click(controls.TrashButton); controls.Undo();
                 Check(f.Persisted.Ideas == f.Original && f.Card.IdeasEditor.Text == f.Original && f.Bench.IdeasEditor.Text == f.Original,
-                    surface + " archive and real undo return identical text on a new active sheet");
+                    surface + " bin and real undo return identical text on a new active sheet");
                 byte[] before = File.ReadAllBytes(f.Store.PathName); int papers = f.PaperCount;
                 Check(!controls.FinishPaperLift(bin) && !controls.IsPaperLifted && before.SequenceEqual(File.ReadAllBytes(f.Store.PathName)) && f.PaperCount == papers,
                     surface + " rejects a held session from before same-text replacement without discarding the newer sheet");
@@ -409,19 +409,20 @@ namespace LocalDesktopNote
         {
             using (var f = new Fixture("history-restore"))
             {
-                f.Navigate("memo"); Click(f.Controls("full").ArchiveButton);
+                f.Navigate("memo"); f.Bench.MemoTitleEditor.Text = "需要取回的长篇标题"; Click(f.Controls("full").TrashButton);
                 Layout(f.Bench.View, 1026, 800); Snapshot(f.Bench.View, "memo-paper-blank.png");
                 f.Bench.IdeasEditor.Text = "准备取回旧纸前，当前新写的一段文字";
                 f.Navigate("history"); var panel = Field<HistoryPanel>(f.Bench, "historyPanel");
                 panel.SelectCategory("memo", "archive");
-                Check(panel.Entries.Count == 1 && panel.Preview.Text == f.Original && panel.RestoreButton.IsEnabled, "real history navigation previews the stored memo and enables recovery");
+                Check(panel.Entries.Count == 1 && panel.Reader.CopyText == f.Original && panel.RestoreButton.IsEnabled, "real history navigation previews the stored memo and enables recovery");
                 Layout(f.Bench.View, 1026, 800); Snapshot(f.Bench.View, "memo-paper-history.png");
                 Click(panel.RestoreButton);
                 Check(f.Card.IdeasEditor.Text == f.Original && f.Bench.IdeasEditor.Text == f.Original, "history restore button returns the selected paper to both editor controls");
+                Check(f.Bench.MemoTitleEditor.Text == "需要取回的长篇标题" && f.Persisted.MemoTitle == "需要取回的长篇标题", "taking back the paper updates the actual title editor and persistent title");
                 Check(f.Persisted.MemoPapers.Any(p => p.Kind == "archive" && p.Text == "准备取回旧纸前，当前新写的一段文字"), "history restore protects the current page before replacing it");
                 Check(Field<string>(f.Bench, "page") == "memo", "successful history recovery takes the user directly to the full memo editor");
                 f.Navigate("history"); panel.SelectCategory("task", "versions");
-                Check(panel.RestoreButton.Visibility == Visibility.Collapsed && panel.Entries.All(e => !e.IsMemo) && !panel.Preview.Text.Contains(f.Original), "task history exposes task-only records without a memo recovery action");
+                Check(panel.RestoreButton.Visibility == Visibility.Collapsed && panel.Entries.All(e => !e.IsMemo) && !panel.Reader.CopyText.Contains(f.Original), "task history exposes task-only records without a memo recovery action");
                 f.CheckTasks("history recovery");
                 Check(File.Exists(Path.Combine(Storage.Folder, "memo-paper-blank.png")) && File.Exists(Path.Combine(Storage.Folder, "memo-paper-history.png")), "neutral production WPF blank-page and history snapshots were rendered");
             }
@@ -434,17 +435,18 @@ namespace LocalDesktopNote
                 f.Bench.IdeasEditor.Text = "做一个更安静的专注计时器，让开始变得更简单。\r\n为阅读场景设计一个轻量的摘录工具。\r\n整理一下最近的旅行照片，写一篇短游记。\r\n尝试用传感器数据记录睡眠，看看规律。";
                 f.Navigate("memo");
                 var full = f.Controls("full");
-                var archiveContent = full.ArchiveButton.Content as StackPanel;
-                Check(archiveContent != null && archiveContent.Children.OfType<TextBlock>().Any(t => t.Text == "存好换新"),
-                    "full paper names the archive action explicitly instead of the ambiguous store-away label");
+                f.Bench.MemoTitleEditor.Text = "生活里的几个小念头";
+                Check(f.Bench.MemoTitleEditor.Opacity == 0.6 && f.Bench.MemoTitleEditor.MaxLength == WorkboardStore.MemoTitleLimit, "paper title starts at sixty percent opacity and has a bounded single-line editor");
+                Check(typeof(MemoPaperControls).GetField("ArchiveButton", BindingFlags.Instance | BindingFlags.NonPublic) == null,
+                    "paper controls remove the redundant store-and-new button entirely");
                 foreach (string surface in new[] { "card", "compact", "full" })
-                    Check(Convert.ToString(f.Controls(surface).ArchiveButton.ToolTip).Contains("收起的纸页"),
-                        surface + " archive help identifies the saved-paper destination before creating a blank sheet");
+                    Check(Convert.ToString(f.Controls(surface).TrashButton.ToolTip).Contains("旧纸"),
+                        surface + " bin help makes the retained old paper discoverable");
                 foreach (Size size in new[] { new Size(1026, 800), new Size(800, 600) })
                 {
                     Layout(f.Bench.View, size.Width, size.Height);
                     var controls = f.Controls("full");
-                    foreach (FrameworkElement target in new FrameworkElement[] { controls.Grabber, controls.ArchiveButton, controls.Bin, f.Bench.IdeasEditor })
+                    foreach (FrameworkElement target in new FrameworkElement[] { controls.Grabber, controls.Bin, f.Bench.IdeasEditor, f.Bench.MemoTitleEditor })
                     {
                         Rect bounds = target.TransformToAncestor(f.Bench.View).TransformBounds(new Rect(target.RenderSize));
                         Check(bounds.Left >= -1 && bounds.Top >= -1 && bounds.Right <= size.Width + 1 && bounds.Bottom <= size.Height + 1 && bounds.Width > 0 && bounds.Height > 0,
@@ -466,8 +468,8 @@ namespace LocalDesktopNote
                 foreach (string surface in new[] { "card", "compact", "full" })
                 {
                     string current = surface;
-                    Run(current + " archive click", delegate { ClickStore(current, "archive"); });
-                    Run(current + " trash click", delegate { ClickStore(current, "trash"); });
+                    Run(current + " legacy archive storage controller", delegate { StoreAndBlank(current, "archive"); });
+                    Run(current + " trash click", delegate { StoreAndBlank(current, "trash"); });
                     Run(current + " undo protection", delegate { UndoProtectsNewText(current); });
                     Run(current + " persisted storage failure", delegate { FailedStorage(current, false); });
                     Run(current + " unsaved flush failure", delegate { FailedStorage(current, true); });

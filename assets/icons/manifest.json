@@ -66,18 +66,30 @@
       "name": "remove"
     },
     {
-      "file": "svg/ic_fluent_archive_24_regular.svg",
-      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Archive/SVG/ic_fluent_archive_24_regular.svg",
-      "sha256": "DE1389AD2E4A8FE9BA9430D8457A1E1F459EF8EDED2EF480788F90A7F7806306",
-      "name": "archive"
-    },
-    {
       "file": "svg/ic_fluent_delete_24_regular.svg",
       "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Delete/SVG/ic_fluent_delete_24_regular.svg",
       "sha256": "0F0769B54D5862F2390EA7E51AAB825E5DC10D4FA36DA34D1559ACC55799BE92",
       "name": "trash"
+    },
+    {
+      "file": "svg/ic_fluent_checkmark_circle_24_filled.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Checkmark%20Circle/SVG/ic_fluent_checkmark_circle_24_filled.svg",
+      "sha256": "0D4604052F37BF6F6FCA386F091316C5E9C3733A8B8AD77CE38E1CDC40A9F24E",
+      "name": "history-done"
+    },
+    {
+      "file": "svg/ic_fluent_circle_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Circle/SVG/ic_fluent_circle_24_regular.svg",
+      "sha256": "8127DEC10FC354A0BF5F5D81B0D7DABB8202ABA9889773A92FCA049A1416D9F2",
+      "name": "history-pending"
+    },
+    {
+      "file": "svg/ic_fluent_copy_24_regular.svg",
+      "source": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/4c94ad5f4081168c0d45bdc368f230ecb757cd09/assets/Copy/SVG/ic_fluent_copy_24_regular.svg",
+      "sha256": "AE4268EEF9BC6CAE4C77A8A2B3B8607861594E0E834E4ED0730667F92E73609E",
+      "name": "copy"
     }
   ],
   "downloaded_utc": "2026-10-21T14:41:41.8545291Z",
-  "variant": "24 regular"
+  "variant": "24 regular; completed history status uses 24 filled"
 }

@@ -66,27 +66,32 @@ namespace LocalDesktopNote
             f.Paper("archive-new", "Morning notes\nA small observation.\nA next step.", "archive", 3);
             f.Paper("trash-new", "Discarded idea\nStill recoverable", "trash", 4);
             f.Snapshot(1, "AUTO MEMO ONLY", "TASK ONLY");
-            var panel = new HistoryPanel(f.Store, delegate(string text) { return true; }); panel.Load();
-            Check(panel.CurrentCategory == "memo" && panel.CurrentFilter == "archive", "default entry is memo / stored papers");
-            Check(panel.Entries.Count == 2 && panel.List.Items.Count == 2, "stored paper list excludes trash and automatic snapshots");
-            Check(panel.Entries[0].Text.StartsWith("Morning notes") && panel.Entries[1].Text.StartsWith("First page"), "papers are sorted by stored timestamp newest first");
-            Check(panel.Entries[0].Title == "Morning notes" && panel.Entries[0].Summary == "A small observation. A next step.", "paper rows use first line and remaining text summary");
-            Check(panel.Preview.Text == f.Store.State.MemoPapers[1].Text && !panel.Preview.Text.Contains("TASK ONLY"), "memo preview is exact original text without task sections");
+            var panel = new HistoryPanel(f.Store, delegate(string text, string title) { return true; }); panel.Load();
+            Check(panel.CurrentCategory == "memo" && panel.CurrentFilter == "papers", "default entry is memo / stored papers");
+            Check(panel.Entries.Count == 3 && panel.List.Items.Count == 3, "old paper list combines archived and binned sheets while excluding automatic snapshots");
+            Check(panel.Entries[0].Text.StartsWith("Discarded idea") && panel.Entries[1].Text.StartsWith("Morning notes") && panel.Entries[2].Text.StartsWith("First page"), "combined papers are sorted by stored timestamp newest first");
+            Check(panel.Entries[1].Title == "Morning notes" && panel.Entries[1].Summary == "A small observation. A next step.", "paper rows use first line and remaining text summary");
+            Check(panel.Reader.CopyText == f.Store.State.MemoPapers[2].Text && !panel.Reader.CopyText.Contains("TASK ONLY"), "memo preview is exact original text without task sections");
+            panel.List.SelectedIndex = 1;
+            Check(panel.Preview.IsReadOnly && panel.Reader.CopyButton.IsEnabled && panel.Reader.TaskRowCount == 0, "stored paper uses the selectable read-only reader with a copy action and no task rows");
+            Check(new System.Windows.Documents.TextRange(panel.Preview.Document.ContentStart, panel.Preview.Document.ContentEnd).Text.Contains("A small observation."), "stored paper text is rendered in the actual reading document");
             Check(panel.RestoreButton.Visibility == Visibility.Visible && panel.RestoreButton.IsEnabled, "stored memo offers take-back action");
             Render(panel, "history-stored-papers", 770, 570); Render(panel, "history-stored-papers-narrow", 600, 390);
-            panel.List.SelectedIndex = 1; panel.Load();
-            Check(panel.List.SelectedIndex == 1 && panel.Preview.Text.StartsWith("First page"), "reload preserves selected paper when it still exists");
+            panel.List.SelectedIndex = 2; panel.Load();
+            Check(panel.List.SelectedIndex == 2 && panel.Reader.CopyText.StartsWith("First page"), "reload preserves selected paper when it still exists");
             panel.SelectCategory("memo", "trash");
-            Check(panel.Entries.Count == 1 && panel.Preview.Text == "Discarded idea\nStill recoverable", "paper bin shows only binned paper and original text");
-            Check(panel.Notice.Text.Contains("仍保留") && panel.RestoreButton.IsEnabled, "paper bin explains recoverability and can take back");
+            Check(panel.CurrentFilter == "papers" && panel.Entries.Count == 3 && panel.Entries.Any(entry => entry.Text == "Discarded idea\nStill recoverable"), "legacy bin navigation leads to the unified old paper list without losing binned text");
+            Check(panel.Notice.Text.Contains("仍保留") && panel.RestoreButton.IsEnabled && f.Store.State.MemoPapers.Count(paper => paper.Kind == "archive") == 2 && f.Store.State.MemoPapers.Count(paper => paper.Kind == "trash") == 1, "unified browsing keeps recovery and original storage kinds unchanged");
             panel.SelectCategory("memo", "versions");
-            Check(panel.Entries.Count == 1 && panel.Preview.Text == "AUTO MEMO ONLY", "automatic versions exclude stored papers and tasks");
+            Check(panel.Entries.Count == 1 && panel.Reader.CopyText == "AUTO MEMO ONLY", "automatic versions exclude stored papers and tasks");
+            Check(panel.Notice.Text.Contains("找回修改前") && Convert.ToString(panel.Notice.ToolTip).Contains("自动"), "editing history explains its automatic recovery purpose in plain language");
             panel.SelectCategory("task", "archive");
             Check(panel.CurrentFilter == "versions" && panel.Entries.Count == 1, "task category has its own snapshot projection");
-            Check(panel.Preview.Text.Contains("TASK ONLY") && !panel.Preview.Text.Contains("AUTO MEMO ONLY") && !panel.Preview.Text.Contains("Morning notes"), "task preview excludes every memo source");
+            Check(panel.Reader.CopyText.Contains("TASK ONLY") && !panel.Reader.CopyText.Contains("AUTO MEMO ONLY") && !panel.Reader.CopyText.Contains("Morning notes"), "task preview excludes every memo source");
+            Check(panel.Reader.TaskRowCount == 1 && !new System.Windows.Documents.TextRange(panel.Preview.Document.ContentStart, panel.Preview.Document.ContentEnd).Text.Contains("[待办]"), "integrated task reader uses a graphical status instead of bracketed text badges");
             Check(panel.RestoreButton.Visibility == Visibility.Collapsed && !panel.RestoreButton.IsEnabled, "task history is read-only with no overwrite action");
             panel.SelectCategory("invalid", "invalid");
-            Check(panel.CurrentCategory == "memo" && panel.CurrentFilter == "archive", "invalid navigation safely returns to default paper list");
+            Check(panel.CurrentCategory == "memo" && panel.CurrentFilter == "papers", "invalid navigation safely returns to default paper list");
         }
         private static void ProjectedDeduplication()
         {
@@ -123,7 +128,7 @@ namespace LocalDesktopNote
             draftsOnly.Snapshot(1, "", null, false, "尚未保存的任务", null, "2026-10-24");
             draftsOnly.Snapshot(2, "", null, false, "尚未保存的任务ping", null, "2026-10-25");
             var emptyPanel = new HistoryPanel(draftsOnly.Store, null); emptyPanel.SelectCategory("task", "versions");
-            Check(emptyPanel.Entries.Count == 1 && emptyPanel.Entries[0].Summary == "当时没有任务" && !emptyPanel.Preview.Text.Contains("尚未保存"), "draft-only snapshots have a neutral committed-task summary and no draft leakage");
+            Check(emptyPanel.Entries.Count == 1 && emptyPanel.Entries[0].Summary == "当时没有任务" && !emptyPanel.Reader.CopyText.Contains("尚未保存"), "draft-only snapshots have a neutral committed-task summary and no draft leakage");
         }
         private static void SentenceAndParagraphVersions()
         {
@@ -205,19 +210,19 @@ namespace LocalDesktopNote
             var f = new Fixture("broken"); f.Snapshot(1, "Good memo", "Good task"); string bad = f.Snapshot(2, "Placeholder");
             File.WriteAllText(bad, "{ invalid json"); byte[] original = File.ReadAllBytes(bad);
             string unsupported = f.Snapshot(3, "Unknown"); var unknown = new WorkboardState { Version = 99 }; LibraryStore.Write(unsupported, unknown);
-            var panel = new HistoryPanel(f.Store, delegate(string text) { return true; }); panel.SelectCategory("memo", "versions");
-            Check(panel.Entries.Count == 1 && panel.Preview.Text == "Good memo", "corrupt and unsupported snapshots do not hide a good memo version");
+            var panel = new HistoryPanel(f.Store, delegate(string text, string title) { return true; }); panel.SelectCategory("memo", "versions");
+            Check(panel.Entries.Count == 1 && panel.Reader.CopyText == "Good memo", "corrupt and unsupported snapshots do not hide a good memo version");
             Check(panel.Notice.Text.Contains("已跳过 2 条") && panel.Notice.Text.Contains("原文件仍保留"), "skipped snapshot count is visible without dumping exception details");
             Check(File.ReadAllBytes(bad).SequenceEqual(original) && File.Exists(unsupported), "reading corrupted history preserves its exact files");
             panel.SelectCategory("task", "versions");
-            Check(panel.Entries.Count == 1 && panel.Preview.Text.Contains("Good task") && panel.Notice.Text.Contains("已跳过 2 条"), "broken snapshots are isolated in task category too");
+            Check(panel.Entries.Count == 1 && panel.Reader.CopyText.Contains("Good task") && panel.Notice.Text.Contains("已跳过 2 条"), "broken snapshots are isolated in task category too");
             f.Paper("good", "Stored memo", "archive", 1); f.Paper("bad-time", "Bad time", "archive", 2); f.Store.State.MemoPapers[1].StoredAtUtc = "not a date"; f.Store.State.MemoPapers.Add(null);
             panel.SelectCategory("memo", "archive");
-            Check(panel.Entries.Count == 1 && panel.Preview.Text == "Stored memo" && panel.Notice.Text.Contains("已跳过 2 条"), "malformed stored paper metadata is skipped without losing valid papers");
+            Check(panel.Entries.Count == 1 && panel.Reader.CopyText == "Stored memo" && panel.Notice.Text.Contains("已跳过 2 条"), "malformed stored paper metadata is skipped without losing valid papers");
             var emptyFixture = new Fixture("empty"); var emptyPanel = new HistoryPanel(emptyFixture.Store, null); emptyPanel.Load();
-            Check(emptyPanel.List.Items.Count == 0 && emptyPanel.Preview.Text == "" && !emptyPanel.RestoreButton.IsEnabled, "old state with null MemoPapers shows a safe empty default");
+            Check(emptyPanel.List.Items.Count == 0 && emptyPanel.Reader.CopyText == "" && !emptyPanel.RestoreButton.IsEnabled, "old state with null MemoPapers shows a safe empty default");
             emptyPanel.SelectCategory("memo", "trash"); Check(emptyPanel.Notice.Text.Contains("可随时取回"), "empty paper bin still explains non-destructive behavior");
-            emptyPanel.SelectCategory("task", "versions"); Check(emptyPanel.List.Items.Count == 0 && emptyPanel.Preview.Text == "", "missing history directory is a safe empty task source");
+            emptyPanel.SelectCategory("task", "versions"); Check(emptyPanel.List.Items.Count == 0 && emptyPanel.Reader.CopyText == "", "missing history directory is a safe empty task source");
             var blankFixture = new Fixture("blank-separator"); blankFixture.Snapshot(1, "Same page"); blankFixture.Snapshot(2, ""); blankFixture.Snapshot(3, "Same page");
             var blankPanel = new HistoryPanel(blankFixture.Store, null); blankPanel.SelectCategory("memo", "versions");
             Check(blankPanel.Entries.Count == 2 && blankPanel.Entries.All(e => e.Text == "Same page"), "empty memo snapshots separate sessions but are not offered as recoverable paper");
@@ -226,7 +231,7 @@ namespace LocalDesktopNote
         {
             var f = new Fixture("restore-callback"); f.Paper("recover", "Recovered page\nExact content", "archive", 1);
             string received = null; bool accept = false; int calls = 0;
-            var panel = new HistoryPanel(f.Store, delegate(string text) { received = text; calls++; return accept; }); panel.Load();
+            var panel = new HistoryPanel(f.Store, delegate(string text, string title) { received = text; calls++; return accept; }); panel.Load();
             Click(panel.RestoreButton);
             Check(calls == 1 && received == "Recovered page\nExact content" && panel.List.Items.Count == 1, "take-back calls the controller with exact original text and retains the list on rejection");
             Check(panel.Notice.Text.Contains("暂时未能取回"), "failed callback leaves a clear recoverable state");
@@ -236,10 +241,15 @@ namespace LocalDesktopNote
             Check(calls == 3 && panel.List.Items.Count == 2 && panel.Notice.Text.Contains("已取回"), "successful take-back refreshes history and reports completion");
             panel.List.SelectedIndex = 0;
             Check(!panel.Notice.Text.Contains("已取回") && panel.Notice.Text.Contains("可随时取回"), "selecting another entry replaces transient feedback with the browsing description");
-            var throwing = new HistoryPanel(f.Store, delegate(string text) { throw new IOException("isolated simulated save failure"); }); throwing.Load(); Click(throwing.RestoreButton);
+            var throwing = new HistoryPanel(f.Store, delegate(string text, string title) { throw new IOException("isolated simulated save failure"); }); throwing.Load(); Click(throwing.RestoreButton);
             Check(throwing.List.Items.Count == 2 && throwing.Notice.Text.Contains("均已保留"), "controller exception preserves browsing and explains that nothing was removed");
             panel.SelectCategory("task", "versions"); Click(panel.RestoreButton);
             Check(calls == 3, "task category never invokes memo restore callback, even if click is raised programmatically");
+            panel.SelectCategory("memo", "papers");
+            f.Store.State.Ideas = panel.Entries[panel.List.SelectedIndex].Text;
+            f.Store.State.MemoTitle = "同正文但不同的当前标题"; accept = false;
+            Click(panel.RestoreButton);
+            Check(panel.Notice.Text.Contains("暂时未能取回") && !panel.Notice.Text.Contains("已经是当前"), "failed take-back with matching body and different title reports failure instead of a false no-op");
         }
         private static void RealStoreTakeBack()
         {
@@ -253,6 +263,53 @@ namespace LocalDesktopNote
             int count = f.Store.State.MemoPapers.Count; Click(panel.RestoreButton);
             Check(f.Store.State.MemoPapers.Count == count && panel.Notice.Text.Contains("已经是当前"), "second take-back of the same selected page is a nonduplicating no-op");
         }
+        private static void RenameTitles()
+        {
+            var f = new Fixture("rename-title");
+            string original = "长篇随手记的正文开头。\n第二段保留原始内容。";
+            f.Paper("named", original, "trash", 1); f.Store.Save();
+            var panel = new HistoryPanel(f.Store, f.Store.OpenMemoText); panel.Load();
+            var row = (ListBoxItem)panel.List.Items[0];
+            var rename = row.ContextMenu.Items.OfType<MenuItem>().Single();
+            Check(Convert.ToString(rename.Header) == "修改标题", "old paper rows expose a right-click rename action");
+            panel.RequestTitle = delegate(string previous) { return "读书与产品的长篇思考"; };
+            rename.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Check(panel.Entries[0].Title == "读书与产品的长篇思考" && panel.Reader.CopyText == original, "right-click command updates the label while retaining the exact original copy payload");
+            Check(new System.Windows.Documents.TextRange(panel.Preview.Document.ContentStart, panel.Preview.Document.ContentEnd).Text.Contains("读书与产品的长篇思考"), "renamed title is also visible above the read-only body");
+            panel.Load(); Check(panel.Entries[0].MemoTitle == "读书与产品的长篇思考", "reloading preserves the custom title on its original paper identity");
+            byte[] saved = File.ReadAllBytes(f.Store.PathName);
+            panel.RequestTitle = delegate(string previous) { return null; };
+            ((ListBoxItem)panel.List.Items[0]).ContextMenu.Items.OfType<MenuItem>().Single().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Check(saved.SequenceEqual(File.ReadAllBytes(f.Store.PathName)), "canceling the rename prompt does not save or alter a paper");
+            panel.RequestTitle = delegate(string previous) { throw new InvalidOperationException("isolated prompt failure"); };
+            ((ListBoxItem)panel.List.Items[0]).ContextMenu.Items.OfType<MenuItem>().Single().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Check(saved.SequenceEqual(File.ReadAllBytes(f.Store.PathName)) && panel.Notice.Text.Contains("未能保存"), "a title prompt failure stays recoverable without mutating stored content");
+            panel.RequestTitle = delegate(string previous) { return ""; };
+            ((ListBoxItem)panel.List.Items[0]).ContextMenu.Items.OfType<MenuItem>().Single().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Check(panel.Entries[0].MemoTitle == null && panel.Entries[0].Title == "长篇随手记的正文开头。", "clearing a title returns to the original body-derived summary");
+            Directory.CreateDirectory(f.Store.PathName + ".tmp");
+            try
+            {
+                panel.RequestTitle = delegate(string previous) { return "失败时不能显示成已改名"; };
+                ((ListBoxItem)panel.List.Items[0]).ContextMenu.Items.OfType<MenuItem>().Single().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                Check(panel.Entries[0].Title == "长篇随手记的正文开头。" && panel.Notice.Text.Contains("未能保存"), "failed rename keeps the original visible title and offers retry feedback");
+            }
+            finally { Directory.Delete(f.Store.PathName + ".tmp"); }
+            panel.RequestTitle = delegate(string previous) { return "取回后仍有标题"; };
+            ((ListBoxItem)panel.List.Items[0]).ContextMenu.Items.OfType<MenuItem>().Single().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Click(panel.RestoreButton);
+            Check(f.Store.State.MemoTitle == "取回后仍有标题" && f.Store.State.Ideas == original, "take-back sends the renamed title and original text to the shared store together");
+            panel.SelectCategory("task", "versions");
+            Check(panel.List.Items.Cast<ListBoxItem>().All(item => item.ContextMenu == null), "task snapshots do not expose memo title editing");
+
+            string path = f.Snapshot(10, original, "task unchanged");
+            byte[] snapshot = File.ReadAllBytes(path);
+            panel.SelectCategory("memo", "versions");
+            panel.RequestTitle = delegate(string previous) { return "给编辑记录单独命名"; };
+            ((ListBoxItem)panel.List.Items[0]).ContextMenu.Items.OfType<MenuItem>().Single().RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+            Check(panel.Entries[0].Title == "给编辑记录单独命名" && snapshot.SequenceEqual(File.ReadAllBytes(path)), "automatic history can be renamed without rewriting the underlying recovery snapshot");
+        }
+
         [STAThread]
         private static int Main()
         {
@@ -267,6 +324,7 @@ namespace LocalDesktopNote
                 Run("broken and absent sources", BrokenEntriesAndEmptySources);
                 Run("controller success rejection and failure", RestoreCallbacks);
                 Run("real store protected take-back", RealStoreTakeBack);
+                Run("memo title context menu and persistence", RenameTitles);
                 Report.AppendLine("Passed: " + passed + "; Failed: " + failed);
                 Report.AppendLine("LIMIT: WPF views and routed Click events are measured/rendered while hidden, using isolated neutral fixture files. No production user files, app processes, native mouse input or registry changes were used.");
                 return failed == 0 ? 0 : 1;

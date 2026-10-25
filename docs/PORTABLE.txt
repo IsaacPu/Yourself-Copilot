@@ -3,8 +3,9 @@ Yourself Copilot
 
 开始：完整解压此文件夹，双击 Yourself Copilot.exe。
 环境：Windows 10 / 11，64 位，.NET Framework 4.8 或以上。
-两个 XAML 文件、fonts、icons 和 illustrations 是运行资源，请和 EXE 放在一起。
+两个 XAML 文件、fonts、icons、illustrations 和 sounds 是运行资源，请和 EXE 放在一起。
 illustrations 包含纸篓、纸页卷角和投放提示图像，不要在复制程序时遗漏。
+sounds 包含轻柔的纸张投放音效；声音设备不可用时不影响保存。
 
 添加任务、写备忘或导入桌面图片；内容自动保存在本程序文件夹。
 关闭工作台会收起到托盘。双击托盘图标重新打开，托盘菜单可完整退出。

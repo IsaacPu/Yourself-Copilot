@@ -15,7 +15,7 @@ namespace LocalDesktopNote
     internal sealed class MemoPaperControls : IDisposable
     {
         internal readonly Grid View;
-        internal readonly Button Grabber, ArchiveButton, TrashButton;
+        internal readonly Button Grabber, TrashButton;
         internal readonly Border Bin;
         internal FrameworkElement PaperSurface, PaperDecoration;
         internal bool IsPaperLifted { get { return lifted; } }
@@ -48,10 +48,6 @@ namespace LocalDesktopNote
             View.Children.Add(Grabber);
             var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
             Grid.SetColumn(actions, 1); View.Children.Add(actions);
-            ArchiveButton = Button("archive", compact ? null : "存好换新", "存入“收起的纸页”，再换一张空白；可在历史记录中取回");
-            ArchiveButton.Click += delegate { StorePaper("archive", null); };
-            if (!compact) { ArchiveButton.Padding = new Thickness(10, 5, 10, 5); ArchiveButton.Margin = new Thickness(8, 0, 0, 0); }
-            actions.Children.Add(ArchiveButton);
             TrashButton = Button("trash", compact ? null : "纸篓", "放入纸篓并换一张空白；旧纸仍可找回");
             if (!compact)
             {
@@ -90,7 +86,7 @@ namespace LocalDesktopNote
         internal void Refresh()
         {
             bool hasText = !String.IsNullOrWhiteSpace(store.State.Ideas);
-            Grabber.IsEnabled = ArchiveButton.IsEnabled = TrashButton.IsEnabled = hasText && !busy;
+            Grabber.IsEnabled = TrashButton.IsEnabled = hasText && !busy;
             if (binImage != null) binImage.Source = AppVisuals.IllustrationSource(store.State.MemoPapers != null && store.State.MemoPapers.Any(p => p.Kind == "trash") ? "memo-bin-filled.png" : "memo-bin.png") ?? AppVisuals.IllustrationSource("memo-bin.png");
         }
         internal bool StorePaper(string kind, string expectedText, long? expectedGeneration = null)

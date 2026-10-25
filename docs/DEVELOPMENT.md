@@ -25,7 +25,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1
 & '.\dist\Yourself-Copilot\Yourself Copilot.exe'
 ```
 
-构建结果包含 EXE、XAML、字体与图标，可从 `dist/Yourself-Copilot/` 运行。不要只复制 EXE。版本读取 `VERSION`，构建时写入 EXE 的文件版本与产品版本。
+构建结果包含EXE、XAML、字体、图标、插画和声音，可从 `dist/Yourself-Copilot/` 运行。不要只复制EXE。版本读取 `VERSION`，构建时写入EXE的文件版本与产品版本。
 
 ## 验证
 
@@ -38,6 +38,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\verify-brand.ps1
 ```
 
 测试使用忽略的 `.qa/` 隔离目录与中性测试图片。其余脚本覆盖共享存储、恢复、窗口切换和字体等专项行为；自动化检查不等同于所有真实场景均已验证。
+
+每次检查会新建隔离目录，旧目录不会自动删除。验收结束后先保存需要的报告、截图或复现脚本，再清理 `.qa/` 中对应的运行副本。正式源码和测试应保存在 `src/`、`tests/`，不要把 Git 仓库或个人数据放入 `.qa/`。`dist/` 可通过构建和打包重新生成；清理前确认其中没有运行后产生的个人数据。
 
 ## 生成下载包
 

@@ -50,16 +50,21 @@ internal static class WorkbenchControlVerification {
    Check(Directory.GetFiles(store.HistoryFolder,"*.json",SearchOption.AllDirectories).Length>0,"content edits produce read-only history material");
    Click(All<Button>(window.View).Single(b=>Convert.ToString(b.Content)=="历史记录"));
    var historyPanel=(HistoryPanel)typeof(WorkbenchWindow).GetField("historyPanel",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(window);
-   Check(historyPanel.CurrentCategory=="memo" && historyPanel.CurrentFilter=="archive" && window.HistoryList.Items.Count==0,"history defaults to deliberately stored papers rather than automatic recovery versions");
+   Check(historyPanel.CurrentCategory=="memo" && historyPanel.CurrentFilter=="papers" && window.HistoryList.Items.Count==0,"history defaults to deliberately stored papers rather than automatic recovery versions");
    historyPanel.SelectCategory("memo","versions");
-   Check(window.HistoryList.Items.Count>0 && window.HistoryPreview.IsReadOnly && historyPanel.Entries.Any(e=>e.Text==window.HistoryPreview.Text) && !window.HistoryPreview.Text.Contains("\"Version\":"),"history presents human-readable read-only content");
-   var expectedMemoVersions=Directory.GetFiles(store.HistoryFolder,"*.json",SearchOption.AllDirectories).Select(path=>store.ReadHistorySnapshot(path).Ideas).Where(text=>!String.IsNullOrWhiteSpace(text)).Distinct().ToArray();
-   foreach(string version in expectedMemoVersions) {
-    int versionIndex=historyPanel.Entries.FindIndex(e=>e.Text==version); window.HistoryList.SelectedIndex=versionIndex;
-    Check(versionIndex>=0 && window.HistoryPreview.IsReadOnly && window.HistoryPreview.Text==version,"every automatic memo recovery version is selectable as exact read-only original text");
+   Check(window.HistoryList.Items.Count>0 && window.HistoryPreview.IsReadOnly && historyPanel.Entries.Any(e=>e.Text==historyPanel.Reader.CopyText) && !historyPanel.Reader.CopyText.Contains("\"Version\":"),"history presents human-readable read-only content");
+   // Raw input steps are intentionally coalesced. Every displayed version
+   // must still select and copy the exact text from its original source file.
+   var expectedMemoVersions=historyPanel.Entries.ToArray();
+   foreach(var version in expectedMemoVersions) {
+    int versionIndex=historyPanel.Entries.FindIndex(e=>e.Key==version.Key); window.HistoryList.SelectedIndex=versionIndex;
+    string sourceText=store.ReadHistorySnapshot(version.SourcePath).Ideas;
+    Check(versionIndex>=0 && window.HistoryPreview.IsReadOnly && historyPanel.Reader.CopyText==sourceText,"every effective memo recovery version is selectable as exact read-only original source text");
    }
+   string latestMemo=Directory.GetFiles(store.HistoryFolder,"*.json",SearchOption.AllDirectories).OrderByDescending(File.GetLastWriteTimeUtc).Select(path=>store.ReadHistorySnapshot(path).Ideas).First(text=>!String.IsNullOrWhiteSpace(text));
+   Check(historyPanel.Entries.Any(e=>e.Text==latestMemo),"coalescing retains the latest saved memo as a recoverable version");
    historyPanel.SelectCategory("task","versions");
-   Check(window.HistoryList.Items.Count>0 && window.HistoryPreview.IsReadOnly && window.HistoryPreview.Text.Contains("任务") && !window.HistoryPreview.Text.Contains("来自桌面卡片的新内容") && !window.HistoryPreview.Text.Contains("保存失败时保留的文字") && historyPanel.RestoreButton.Visibility==Visibility.Collapsed,"task history remains readable and read-only without unrelated memo content or overwrite action");
+   Check(window.HistoryList.Items.Count>0 && window.HistoryPreview.IsReadOnly && historyPanel.Reader.CopyText.Contains("任务") && !historyPanel.Reader.CopyText.Contains("来自桌面卡片的新内容") && !historyPanel.Reader.CopyText.Contains("保存失败时保留的文字") && historyPanel.RestoreButton.Visibility==Visibility.Collapsed,"task history remains readable and read-only without unrelated memo content or overwrite action");
    bool autoStart=false; window.GetAutoStart=delegate { return autoStart; }; window.SetAutoStart=delegate(bool value) { autoStart=value; };
    Click(All<Button>(window.View).Single(b=>Convert.ToString(b.Content)=="设置"));
    Check(window.LaunchAtLoginCheck.IsChecked==false && window.StartupCardCheck.IsChecked==true,"startup and card visibility settings have separate true state");

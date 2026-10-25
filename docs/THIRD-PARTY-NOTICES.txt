@@ -21,6 +21,12 @@ fonts/font-assets-manifest.json and icons/manifest.json.
 The application companion mark is separate from Fluent icons.
 Its provenance is documented in icons/brand/README.md.
 
+Paper illustrations and sound
+The project illustrations were generated for this application with OpenAI ImageGen.
+The paper sound is original procedural synthesis, with no external recording.
+Provenance is recorded in illustrations/README.txt and sounds/README.txt.
+These project resources are separate from the third-party fonts and Fluent icons.
+
 Resource paths above are relative to the portable application's folder.
 In the source repository they are under assets/.
 Project code currently has no selected open-source license; these notices

@@ -366,6 +366,72 @@ namespace LocalDesktopNote
             Check(blocked.Store.OpenMemoText(paper.Text) && blocked.Persisted.Ideas == paper.Text, "stored papers can be recovered after restart even when recovery history remains unavailable");
         }
 
+        private static void TitlesAndRenaming()
+        {
+            var f = new Fixture("titles", "长篇正文保持原样。\n第二段仍然是原文。");
+            string original = f.Store.State.Ideas;
+            int historyCount = f.History.Length;
+            foreach (string title in new[] { "长", "长篇", "长篇阅读随记" }) { f.Store.State.MemoTitle = title; f.Store.Save(); }
+            Check(f.Persisted.MemoTitle == "长篇阅读随记" && f.History.Length == historyCount && f.Persisted.Ideas == original, "title autosaves persist independently without keystroke history or body changes");
+            var paper = f.Store.StoreCurrentMemo("trash");
+            Check(paper.Title == "长篇阅读随记" && f.Persisted.MemoPapers.Single().Title == paper.Title && String.IsNullOrEmpty(f.Persisted.MemoTitle), "putting a titled paper in the bin stores its title and starts an untitled blank sheet");
+            f.Store.UndoMemoPaper();
+            Check(f.Persisted.Ideas == original && f.Persisted.MemoTitle == paper.Title, "paper undo restores the original title together with its body");
+            f.Store.RedoMemoPaper();
+            Check(f.Persisted.Ideas == "" && String.IsNullOrEmpty(f.Persisted.MemoTitle), "paper redo returns to the blank sheet without leaking the old title");
+            f.Store = f.Open();
+            Check(f.Store.OpenMemoText(paper.Text, paper.Title) && f.Persisted.MemoTitle == paper.Title, "restart and take-back preserve a stored paper title");
+            f.Store.State.MemoTitle = "当前页自己的名字"; f.Store.Save();
+            f.Store.OpenMemoText("另一张纸的正文。", "另一张纸");
+            Check(f.Persisted.MemoPapers.Any(value => value.Text == original && value.Title == "当前页自己的名字"), "take-back protects the current page with its actual title");
+            f.Store.UndoMemoPaper();
+            Check(f.Persisted.MemoTitle == "当前页自己的名字" && f.Persisted.Ideas == original, "undo after take-back restores the protected title and body pair");
+            f.Store.RedoMemoPaper();
+            Check(f.Persisted.MemoTitle == "另一张纸" && f.Persisted.Ideas == "另一张纸的正文。", "redo restores the selected historical title and body pair");
+
+            f.Store.RenameMemo(paper.Id, null, "右键改好的标题");
+            Check(f.Persisted.MemoPapers.First(value => value.Id == paper.Id).Title == "右键改好的标题" && f.Persisted.MemoPapers.First(value => value.Id == paper.Id).Text == original && f.Persisted.MemoTitle == "另一张纸", "renaming an archived paper changes only its title metadata");
+            int count = f.History.Length;
+            f.Store.RenameMemo(paper.Id, null, "再次修改标题");
+            Check(f.History.Length == count, "renaming an old paper creates no new content history versions");
+
+            string folder = Path.Combine(f.Store.HistoryFolder, "2026-10-25"); Directory.CreateDirectory(folder);
+            string snapshot = Path.Combine(folder, "named-original.json");
+            using (var stream = File.Create(snapshot)) new DataContractJsonSerializer(typeof(WorkboardState)).WriteObject(stream, new WorkboardState { Ideas = original, MemoTitle = "原始快照的标题" });
+            byte[] source = File.ReadAllBytes(snapshot); DateTime sourceTime = File.GetLastWriteTimeUtc(snapshot);
+            f.Store.RenameMemo(null, snapshot, "只改索引名称");
+            Check(source.SequenceEqual(File.ReadAllBytes(snapshot)) && sourceTime == File.GetLastWriteTimeUtc(snapshot), "renaming automatic history never changes the original snapshot bytes or timestamp");
+            f.Store = f.Open();
+            Check(f.Store.HistoryMemoTitle(snapshot, "原始快照的标题") == "只改索引名称", "history title overrides survive restart");
+            f.Store.RenameMemo(null, snapshot, " ");
+            Check(f.Store.HistoryMemoTitle(snapshot, "原始快照的标题") == null, "clearing an override explicitly restores the body-derived display name");
+
+            string oldTitle = f.Store.State.MemoPapers.First(value => value.Id == paper.Id).Title;
+            var oldTitles = f.Store.State.MemoHistoryTitles; byte[] primary = File.ReadAllBytes(f.Store.PathName);
+            Directory.CreateDirectory(f.Store.PathName + ".tmp");
+            try
+            {
+                Check(FailsIo(delegate { f.Store.RenameMemo(paper.Id, null, "不会保存的名字"); }) && f.Store.State.MemoPapers.First(value => value.Id == paper.Id).Title == oldTitle, "failed paper rename rolls back its in-memory title");
+                Check(FailsIo(delegate { f.Store.RenameMemo(null, snapshot, "不会保存的索引"); }) && Object.ReferenceEquals(oldTitles, f.Store.State.MemoHistoryTitles), "failed snapshot rename rolls back the title override map");
+                Check(FailsIo(delegate { f.Store.StoreCurrentMemo("trash"); }) && f.Store.State.MemoTitle == "另一张纸" && f.Store.State.Ideas == "另一张纸的正文。", "failed page replacement preserves the title and body together");
+                Check(primary.SequenceEqual(File.ReadAllBytes(f.Store.PathName)), "failed title and paper writes preserve exact primary file bytes");
+            }
+            finally { Directory.Delete(f.Store.PathName + ".tmp"); }
+            f.Store.RenameMemo(null, snapshot, "可移动的标题");
+            string movedFolder = Path.Combine(f.Folder, "moved-copy"); Directory.CreateDirectory(Path.Combine(movedFolder, "history", "workboard", "2026-10-25"));
+            File.Copy(f.Store.PathName, Path.Combine(movedFolder, "workboard.json"));
+            string movedSnapshot = Path.Combine(movedFolder, "history", "workboard", "2026-10-25", "named-original.json"); File.Copy(snapshot, movedSnapshot);
+            Check(new WorkboardStore(movedFolder).HistoryMemoTitle(movedSnapshot, null) == "可移动的标题", "relative snapshot identities keep renamed titles when a portable directory moves");
+            Check(WorkboardStore.NormalizeMemoTitle(new string('甲', 79) + "🌿") == new string('甲', 79), "title length limit never splits a Unicode surrogate pair");
+            Check(!f.Store.RenameMemo("absent-paper", null, "missing") && f.Store.State.MemoPapers.All(value => value.Id != "absent-paper"), "renaming an unavailable paper cannot create a phantom record");
+            byte[] currentPrimary = File.ReadAllBytes(f.Store.PathName);
+            bool rejected = false; try { f.Store.RenameMemo(null, f.Store.PathName, "outside history"); } catch (ArgumentException) { rejected = true; }
+            Check(rejected && currentPrimary.SequenceEqual(File.ReadAllBytes(f.Store.PathName)), "snapshot title edits reject a source outside history without changing primary data");
+            f.Store.State.Ideas += "\n新增完整句子。"; f.Store.Save(); f.Store.CheckpointMemoHistory(true);
+            var latest = f.History.Select(path => f.Store.ReadHistorySnapshot(path)).First(value => value.Ideas == f.Store.State.Ideas);
+            Check(latest.MemoTitle == f.Store.State.MemoTitle && latest.MemoHistoryTitles == null && latest.MemoPapers == null, "recovery snapshots carry their own title without repeating global title maps or paper collections");
+        }
+
         private static int Main()
         {
             int exitCode = 0;
@@ -373,7 +439,7 @@ namespace LocalDesktopNote
             {
                 EmptyAndExpectedText(); StoreAndRestart("archive"); StoreAndRestart("trash"); PrimaryWriteFailure(); SameTextSheetIdentity();
                 SharedPaperUndoRedo(); ReplayProtectsInterveningText(); ReplayFailureIsRetryable();
-                RestoreWithProtection(); NotificationFailures(); TaskAndHistoryIsolation(); LegacyAndHistoryFailure();
+                RestoreWithProtection(); NotificationFailures(); TaskAndHistoryIsolation(); LegacyAndHistoryFailure(); TitlesAndRenaming();
                 Report.AppendLine("RESULT: " + assertions + " assertions passed, 0 failed");
             }
             catch (Exception error) { Report.AppendLine(error.ToString()); exitCode = 1; }

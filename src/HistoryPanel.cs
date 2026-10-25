@@ -19,7 +19,8 @@ namespace LocalDesktopNote
     {
         internal readonly Grid View;
         internal readonly ListBox List;
-        internal readonly TextBox Preview;
+        internal readonly RichTextBox Preview;
+        internal readonly HistoryReadingView Reader;
         internal readonly TextBlock Notice;
         internal readonly Button RestoreButton;
         internal readonly List<HistoryEntry> Entries = new List<HistoryEntry>();
@@ -27,36 +28,38 @@ namespace LocalDesktopNote
         internal string CurrentFilter { get { return filter; } }
 
         private readonly WorkboardStore store;
-        private readonly Func<string, bool> openMemo;
+        private readonly Func<string, string, bool> openMemo;
+        internal Func<string, string> RequestTitle;
         private readonly StackPanel filters;
-        private readonly TextBlock previewHeading, previewTime, empty;
+        private readonly DockPanel actions;
+        private readonly HistoryArchivePanel archive;
         private readonly Dictionary<string, Button> categories = new Dictionary<string, Button>();
         private readonly Dictionary<string, Button> filterButtons = new Dictionary<string, Button>();
-        private string category = "memo", filter = "archive";
+        private string category = "memo", filter = "papers";
         private string loadNotice;
         private bool loading;
         private readonly Brush ink = Brush("#344438"), muted = Brush("#7D877C"), green = Brush("#64806B"), pale = Brush("#E7EBE1");
 
         internal sealed class HistoryEntry
         {
-            internal string Key, Title, Summary, Text, SourcePath;
+            internal string Key, Title, Summary, Text, SourcePath, MemoTitle;
             internal DateTime StoredAt;
             internal bool IsMemo;
+            internal WorkboardState State;
         }
 
-        internal HistoryPanel(WorkboardStore store, Func<string, bool> openMemo)
+        internal HistoryPanel(WorkboardStore store, Func<string, string, bool> openMemo)
         {
             if (store == null) throw new ArgumentNullException("store");
             this.store = store; this.openMemo = openMemo;
+            RequestTitle = delegate(string title) { return MemoTitlePrompt.Ask(View, title); };
             View = new Grid { Background = Brush("#FAF8F3") };
             View.SetValue(TextElement.FontFamilyProperty, AppTypography.Body);
             View.SetValue(TextElement.FontSizeProperty, 13.0);
             View.SetValue(TextElement.ForegroundProperty, ink);
             View.Resources = (ResourceDictionary)XamlReader.Parse(@"<ResourceDictionary xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'>
  <Style TargetType='Button'><Setter Property='Background' Value='Transparent'/><Setter Property='Foreground' Value='#344438'/><Setter Property='BorderThickness' Value='0'/><Setter Property='Padding' Value='13,8'/><Setter Property='Cursor' Value='Hand'/><Setter Property='HorizontalContentAlignment' Value='Center'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='Button'><Border x:Name='Body' CornerRadius='7' Background='{TemplateBinding Background}' Padding='{TemplateBinding Padding}' BorderBrush='#64806B'><ContentPresenter HorizontalAlignment='{TemplateBinding HorizontalContentAlignment}' VerticalAlignment='Center'/></Border><ControlTemplate.Triggers><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Body' Property='Background' Value='#E7EBE1'/></Trigger><Trigger Property='IsKeyboardFocused' Value='True'><Setter TargetName='Body' Property='BorderThickness' Value='1'/></Trigger><Trigger Property='IsEnabled' Value='False'><Setter Property='Opacity' Value='0.4'/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
- <Style TargetType='ListBoxItem'><Setter Property='HorizontalContentAlignment' Value='Stretch'/><Setter Property='Padding' Value='0'/><Setter Property='BorderThickness' Value='0'/><Setter Property='Template'><Setter.Value><ControlTemplate TargetType='ListBoxItem'><Border x:Name='Body' Background='Transparent' BorderBrush='#E2E5DB' BorderThickness='0,0,0,1' Padding='12,13'><ContentPresenter/></Border><ControlTemplate.Triggers><Trigger Property='IsMouseOver' Value='True'><Setter TargetName='Body' Property='Background' Value='#F0F2EA'/></Trigger><Trigger Property='IsSelected' Value='True'><Setter TargetName='Body' Property='Background' Value='#E7EBE1'/></Trigger><Trigger Property='IsKeyboardFocused' Value='True'><Setter TargetName='Body' Property='BorderBrush' Value='#64806B'/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter></Style>
  </ResourceDictionary>");
-            View.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             View.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             View.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             View.RowDefinitions.Add(new RowDefinition());
@@ -65,29 +68,18 @@ namespace LocalDesktopNote
             AddCategory(categoryBar, "memo", "随手记", "note"); AddCategory(categoryBar, "task", "任务", "tasks");
             View.Children.Add(categoryBar);
             filters = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 9) };
-            AddFilter("archive", "收起的纸页"); AddFilter("trash", "纸篓"); AddFilter("versions", "自动版本");
+            AddFilter("papers", "旧纸页"); AddFilter("versions", "编辑记录");
+            filterButtons["papers"].ToolTip = "放进纸篓、以前收起或取回时保护下来的整页文字，都在这里";
+            filterButtons["versions"].ToolTip = "写作时自动留下的修改记录，用来找回修改前的内容；不必手动保存";
             Grid.SetRow(filters, 1); View.Children.Add(filters);
-            Notice = new TextBlock { Foreground = muted, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 13) };
-            AutomationProperties.SetName(Notice, "历史记录状态"); Grid.SetRow(Notice, 2); View.Children.Add(Notice);
-
-            var body = new Grid(); body.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(0.37, GridUnitType.Star), MinWidth = 190, MaxWidth = 280 }); body.ColumnDefinitions.Add(new ColumnDefinition());
-            Grid.SetRow(body, 3); View.Children.Add(body);
-            var listHost = new Grid { Margin = new Thickness(0, 0, 15, 0) };
-            List = new ListBox { Background = Brushes.Transparent, BorderThickness = new Thickness(0), HorizontalContentAlignment = HorizontalAlignment.Stretch, Padding = new Thickness(0) };
-            ScrollViewer.SetHorizontalScrollBarVisibility(List, ScrollBarVisibility.Disabled); ScrollViewer.SetVerticalScrollBarVisibility(List, ScrollBarVisibility.Auto);
-            AutomationProperties.SetName(List, "随手记历史列表"); listHost.Children.Add(List);
-            empty = new TextBlock { Foreground = muted, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(12, 20, 12, 0), IsHitTestVisible = false }; listHost.Children.Add(empty); body.Children.Add(listHost);
-            var detail = new Grid(); detail.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); detail.RowDefinitions.Add(new RowDefinition()); detail.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            var detailHeader = new StackPanel { Margin = new Thickness(19, 17, 19, 12) };
-            previewHeading = new TextBlock { Text = "留在这里的文字", FontSize = 15, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis }; detailHeader.Children.Add(previewHeading);
-            previewTime = new TextBlock { Foreground = muted, FontSize = 11, Margin = new Thickness(0, 6, 0, 0) }; detailHeader.Children.Add(previewTime); detail.Children.Add(detailHeader);
-            Preview = new TextBox { IsReadOnly = true, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, VerticalContentAlignment = VerticalAlignment.Top, Background = Brushes.Transparent, Foreground = ink, BorderThickness = new Thickness(0), FontFamily = AppTypography.Body, FontSize = 15, Padding = new Thickness(19, 0, 19, 16), SelectionBrush = Brush("#CBD9C9") };
-            AutomationProperties.SetName(Preview, "历史内容只读预览"); Grid.SetRow(Preview, 1); detail.Children.Add(Preview);
-            var actions = new DockPanel { Margin = new Thickness(18, 0, 18, 16) };
+            archive = new HistoryArchivePanel(store);
+            List = archive.List; Reader = archive.Reader; Preview = Reader.Document; Notice = archive.Notice;
+            Grid.SetRow(archive.View, 2); View.Children.Add(archive.View);
+            actions = new DockPanel { Margin = new Thickness(24, 0, 24, 16) };
             RestoreButton = MakeButton("取回这页", RestoreSelected); RestoreButton.Background = pale; RestoreButton.Foreground = green; RestoreButton.IsEnabled = false;
             RestoreButton.ToolTip = "当前纸页会先收好，再把这一页放回随手记"; AutomationProperties.SetName(RestoreButton, "取回这页随手记");
-            DockPanel.SetDock(RestoreButton, Dock.Right); actions.Children.Add(RestoreButton); actions.Children.Add(new Border()); Grid.SetRow(actions, 2); detail.Children.Add(actions);
-            var paper = new Border { Background = Brush("#FDFCF9"), BorderBrush = Brush("#DFE3D8"), BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(10), Child = detail }; Grid.SetColumn(paper, 1); body.Children.Add(paper);
+            DockPanel.SetDock(RestoreButton, Dock.Right); actions.Children.Add(RestoreButton); actions.Children.Add(new Border());
+            Reader.View.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); Grid.SetRow(actions, 2); Reader.View.Children.Add(actions);
             List.SelectionChanged += delegate { if (!loading) ShowSelection(); };
             UpdateNavigation();
         }
@@ -100,7 +92,7 @@ namespace LocalDesktopNote
         }
         private void AddCategory(Panel target, string key, string title, string icon)
         {
-            var button = MakeButton(title, delegate { SelectCategory(key, key == "memo" ? "archive" : "versions"); });
+            var button = MakeButton(title, delegate { SelectCategory(key, key == "memo" ? "papers" : "versions"); });
             var label = new StackPanel { Orientation = Orientation.Horizontal }; label.Children.Add(AppVisuals.Icon(icon, 16, green)); label.Children.Add(new TextBlock { Text = title, Margin = new Thickness(8, 0, 0, 0) }); button.Content = label;
             AutomationProperties.SetName(button, title + "历史"); categories.Add(key, button); target.Children.Add(button);
         }
@@ -115,13 +107,14 @@ namespace LocalDesktopNote
             foreach (var pair in filterButtons) { pair.Value.Background = pair.Key == filter ? pale : Brushes.Transparent; pair.Value.Foreground = pair.Key == filter ? ink : muted; }
             filters.Visibility = category == "memo" ? Visibility.Visible : Visibility.Collapsed;
             RestoreButton.Visibility = category == "memo" ? Visibility.Visible : Visibility.Collapsed;
+            actions.Visibility = RestoreButton.Visibility;
             AutomationProperties.SetName(List, category == "memo" ? "随手记历史列表" : "任务历史列表");
         }
 
         internal void SelectCategory(string category, string filter)
         {
             this.category = category == "task" ? "task" : "memo";
-            this.filter = this.category == "task" ? "versions" : filter == "trash" || filter == "versions" ? filter : "archive";
+            this.filter = this.category == "task" || filter == "versions" ? "versions" : "papers";
             UpdateNavigation(); Load();
         }
 
@@ -132,35 +125,46 @@ namespace LocalDesktopNote
             loading = true;
             try
             {
-                Entries.Clear(); List.Items.Clear(); Preview.Text = ""; previewTime.Text = ""; RestoreButton.IsEnabled = false;
+                Entries.Clear(); RestoreButton.IsEnabled = false;
                 if (category == "memo" && filter != "versions") LoadPapers(ref skipped);
                 else LoadSnapshots(ref skipped, out readError);
-                foreach (HistoryEntry entry in Entries) List.Items.Add(MakeItem(entry));
-                empty.Text = category == "task" ? "任务保存或状态调整后，之前的状态会留在这里。" : filter == "archive" ? "收起一页后，它会留在这里。" : filter == "trash" ? "纸篓是空的。\n丢进来的纸页仍可以取回。" : "写完一句或一段后，自动版本会留在这里。";
-                empty.Visibility = Entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-                string source = category == "task" ? "任务历史只记录已保存的任务及状态变化；未提交的草稿和随手记不会增加任务记录。" : filter == "archive" ? "收起的纸页可随时取回；当前写着的内容会先收好。" : filter == "trash" ? "丢进纸篓的纸页仍保留在本机，可随时取回。" : "自动版本按完整句段保留；两分钟内同一句的小改字和输入过程合并为最新内容，原文件仍保留。";
-                loadNotice = (Entries.Count == 0 ? "" : "显示最近 " + Entries.Count + " 页 · ") + source;
+                string emptyText = category == "task" ? "任务保存或状态调整后，之前的状态会留在这里。" : filter == "papers" ? "放进纸篓的旧纸会留在这里，随时可以取回。" : "写完一句或一段后，会自动留下修改记录。\n需要找回修改前的内容时，可以来这里。";
+                string source = category == "task" ? "任务历史只记录已保存的任务及状态变化；未提交的草稿和随手记不会增加任务记录。" : filter == "papers" ? "纸篓、以前收起的纸页及取回时保护的当前页统一在这里，可随时取回；原记录保留。" : "写作时自动留下的修改记录，用来找回修改前的内容。按完整句段保留，小改字和输入过程合并，原文件仍保留。";
+                loadNotice = Entries.Count + (category == "task" || filter == "versions" ? " 个版本" : " 页") + " · 仅保存在本机";
+                if (category == "memo" && filter != "versions") loadNotice += " · 可随时取回，原纸仍保留";
+                else if (category == "memo") loadNotice += " · 找回修改前的内容";
                 if (skipped > 0) loadNotice += " 已跳过 " + skipped + " 条暂时无法读取的记录，原文件仍保留。";
                 if (!String.IsNullOrEmpty(readError)) loadNotice += " 部分历史目录暂时无法读取，当前内容不受影响。";
-                Notice.Text = loadNotice;
-                int index = selected == null ? -1 : Entries.FindIndex(e => e.Key == selected);
-                List.SelectedIndex = index >= 0 ? index : Entries.Count > 0 ? 0 : -1;
+                archive.Present(Entries.Select(entry => new HistoryArchivePanel.HistoryVersion {
+                    SourcePath = entry.Key, Title = entry.IsMemo ? entry.Title : entry.Summary, StoredAt = entry.StoredAt,
+                    State = entry.IsMemo ? new WorkboardState { Ideas = entry.Text, MemoTitle = entry.MemoTitle } : entry.State
+                }), category == "memo", category == "task", loadNotice, emptyText, selected);
+                if (category == "memo")
+                    foreach (ListBoxItem item in List.Items)
+                    {
+                        var row = item;
+                        row.PreviewMouseRightButtonDown += delegate { List.SelectedItem = row; };
+                        var rename = new MenuItem { Header = "修改标题" };
+                        rename.Click += delegate { RenameSelected(); };
+                        row.ContextMenu = new ContextMenu(); row.ContextMenu.Items.Add(rename);
+                    }
+                Notice.ToolTip = source;
             }
             finally { loading = false; }
             ShowSelection();
         }
 
-        private HistoryEntry SelectedEntry { get { var item = List.SelectedItem as ListBoxItem; return item == null ? null : item.Tag as HistoryEntry; } }
+        private HistoryEntry SelectedEntry { get { var item = List.SelectedItem as ListBoxItem; return item == null ? null : Entries.FirstOrDefault(entry => entry.Key == item.Tag as string); } }
         private void LoadPapers(ref int skipped)
         {
             var papers = new List<HistoryEntry>();
             foreach (MemoPaper paper in store.State.MemoPapers ?? new List<MemoPaper>())
             {
                 if (paper == null) { skipped++; continue; }
-                if (paper.Kind != filter) continue;
+                if (paper.Kind != "archive" && paper.Kind != "trash") continue;
                 DateTimeOffset time;
                 if (String.IsNullOrWhiteSpace(paper.Text) || String.IsNullOrEmpty(paper.Id) || !DateTimeOffset.TryParse(paper.StoredAtUtc, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out time)) { skipped++; continue; }
-                papers.Add(MemoEntry("paper:" + paper.Id, paper.Text, time.LocalDateTime, null));
+                papers.Add(MemoEntry("paper:" + paper.Id, paper.Text, time.LocalDateTime, null, paper.Title));
             }
             Entries.AddRange(papers.OrderByDescending(p => p.StoredAt).ThenBy(p => p.Key, StringComparer.Ordinal).Take(300));
         }
@@ -203,7 +207,7 @@ namespace LocalDesktopNote
                         if (String.IsNullOrWhiteSpace(projection)) newerMemo = null;
                         else if (newerMemo == null || !MergeMemoStep(projection, newerMemo.Text, file.LastWriteTime, newerMemo.StoredAt))
                         {
-                            newerMemo = MemoEntry("snapshot:" + file.FullName, projection, file.LastWriteTime, file.FullName); Entries.Add(newerMemo);
+                            newerMemo = MemoEntry("snapshot:" + file.FullName, projection, file.LastWriteTime, file.FullName, store.HistoryMemoTitle(file.FullName, snapshot.MemoTitle)); Entries.Add(newerMemo);
                         }
                     }
                     else
@@ -213,7 +217,7 @@ namespace LocalDesktopNote
                         string title = pending + " 项待办 · " + done + " 项已完成";
                         int removed = (snapshot.Removed ?? new List<WorkTask>()).Count(t => t != null);
                         string summary = tasks.Select(t => t.Text).FirstOrDefault(t => !String.IsNullOrWhiteSpace(t)) ?? (removed > 0 ? "已移除 " + removed + " 项任务" : "当时没有任务");
-                        Entries.Add(new HistoryEntry { Key = "task:" + file.FullName, Title = title, Summary = Compact(summary, 88), StoredAt = file.LastWriteTime, Text = TaskPreview(snapshot), SourcePath = file.FullName, IsMemo = false });
+                        Entries.Add(new HistoryEntry { Key = "task:" + file.FullName, Title = title, Summary = Compact(summary, 88), StoredAt = file.LastWriteTime, Text = TaskPreview(snapshot), SourcePath = file.FullName, IsMemo = false, State = snapshot });
                     }
                     // The sequence is newest first. Fill the visible range
                     // after projection/coalescing, then leave older JSON unread.
@@ -255,51 +259,50 @@ namespace LocalDesktopNote
             return common > 0 && (common == input.Length || common >= 2);
         }
 
-        private static HistoryEntry MemoEntry(string key, string text, DateTime time, string source)
+        private static HistoryEntry MemoEntry(string key, string text, DateTime time, string source, string title)
         {
             string first = text.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n').FirstOrDefault(s => !String.IsNullOrWhiteSpace(s)) ?? "未命名纸页";
             string trimmed = text.Trim(); int firstBreak = trimmed.IndexOfAny(new[] { '\r', '\n' });
             string remainder = firstBreak < 0 ? "" : trimmed.Substring(firstBreak).Trim();
-            return new HistoryEntry { Key = key, Title = Compact(first.Trim(), 48), Summary = Compact(remainder, 100), Text = text, StoredAt = time, IsMemo = true, SourcePath = source };
+            title = WorkboardStore.NormalizeMemoTitle(title);
+            return new HistoryEntry { Key = key, Title = title ?? Compact(first.Trim(), 48), MemoTitle = title, Summary = Compact(remainder, 100), Text = text, StoredAt = time, IsMemo = true, SourcePath = source };
         }
         private static string Compact(string text, int limit)
         {
             string value = (text ?? "").Replace('\r', ' ').Replace('\n', ' ').Trim();
             return value.Length > limit ? value.Substring(0, limit) + "…" : value;
         }
-        private ListBoxItem MakeItem(HistoryEntry entry)
-        {
-            var lines = new StackPanel();
-            lines.Children.Add(new TextBlock { Text = entry.Title, FontSize = 13.5, FontWeight = FontWeights.SemiBold, Foreground = ink, TextTrimming = TextTrimming.CharacterEllipsis });
-            lines.Children.Add(new TextBlock { Text = entry.StoredAt.ToString("yyyy-MM-dd  HH:mm", CultureInfo.InvariantCulture), Foreground = muted, FontSize = 10.5, Margin = new Thickness(0, 5, 0, 0) });
-            if (!String.IsNullOrEmpty(entry.Summary)) lines.Children.Add(new TextBlock { Text = entry.Summary, Foreground = muted, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.CharacterEllipsis, MaxHeight = 36, LineHeight = 18, Margin = new Thickness(0, 7, 0, 0) });
-            var item = new ListBoxItem { Content = lines, Tag = entry, ToolTip = entry.Title };
-            AutomationProperties.SetName(item, entry.Title + "，" + entry.StoredAt.ToString("yyyy年M月d日 HH:mm", CultureInfo.InvariantCulture)); return item;
-        }
-
-        internal void ShowSelection()
+        private void ShowSelection()
         {
             HistoryEntry entry = SelectedEntry;
             if (loadNotice != null) Notice.Text = loadNotice;
             RestoreButton.IsEnabled = entry != null && entry.IsMemo && openMemo != null;
-            if (entry == null)
-            {
-                Preview.Text = ""; previewHeading.Text = category == "memo" ? "留在这里的文字" : "之前的任务状态"; previewTime.Text = ""; return;
-            }
-            previewHeading.Text = entry.Title;
-            previewTime.Text = entry.StoredAt.ToString("yyyy年M月d日  HH:mm", CultureInfo.InvariantCulture) + (entry.IsMemo ? filter == "trash" ? " · 放入纸篓" : filter == "versions" ? " · 自动保留" : " · 收起" : " · 只读记录");
-            Preview.FontFamily = entry.IsMemo ? AppTypography.Memo : AppTypography.Body;
-            Preview.Text = entry.Text; Preview.ScrollToHome();
         }
         private void RestoreSelected()
         {
             HistoryEntry entry = SelectedEntry; if (entry == null || !entry.IsMemo || openMemo == null) return;
             try
             {
-                if (openMemo(entry.Text)) { Load(); Notice.Text = "这页已取回，当前内容已先收好。"; }
-                else Notice.Text = (store.State.Ideas ?? "") == entry.Text ? "这页已经是当前随手记，无需重复取回。" : "这页暂时未能取回，当前内容与原记录均已保留。";
+                if (openMemo(entry.Text, entry.MemoTitle)) { Load(); Notice.Text = "这页已取回，当前内容已先收好。"; }
+                else Notice.Text = (store.State.Ideas ?? "") == entry.Text && WorkboardStore.NormalizeMemoTitle(store.State.MemoTitle) == WorkboardStore.NormalizeMemoTitle(entry.MemoTitle)
+                    ? "这页已经是当前随手记，无需重复取回。" : "这页暂时未能取回，当前内容与原记录均已保留。";
             }
             catch { Notice.Text = "这页暂时未能取回，当前内容与原记录均已保留。"; }
+        }
+
+        private void RenameSelected()
+        {
+            HistoryEntry entry = SelectedEntry;
+            if (entry == null || !entry.IsMemo || RequestTitle == null) return;
+            try
+            {
+                string title = RequestTitle(entry.MemoTitle ?? entry.Title);
+                if (title == null) return;
+                string id = entry.SourcePath == null ? entry.Key.Substring("paper:".Length) : null;
+                if (!store.RenameMemo(id, entry.SourcePath, title)) { Notice.Text = "这页暂时无法重命名，原记录仍保留。"; return; }
+                Load(); Notice.Text = "标题已更新，正文保持原样。";
+            }
+            catch { Notice.Text = "标题暂时未能保存，原记录仍保留。请稍后重试。"; }
         }
 
         private static void AppendPart(StringBuilder text, string value)

@@ -9,5 +9,6 @@ namespace LocalDesktopNote
         [DataMember] public string Text;
         [DataMember] public string StoredAtUtc;
         [DataMember] public string Kind;
+        [DataMember(EmitDefaultValue = false)] public string Title;
     }
 }
