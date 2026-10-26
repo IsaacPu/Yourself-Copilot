@@ -1,12 +1,14 @@
 # 使用与更新
 
-v0.2.0包含纸页随手记、可取回的纸篓、独立标题和分类历史。日常使用请下载Release中的Windows免安装包，完整解压并保留随附资源。
+v0.2.0包含纸页随手记、可取回的纸篓、独立标题和分类历史。日常使用请下载Release中的Windows EXE安装包。
 
 ## 第一次使用
 
-从 [Releases](https://github.com/IsaacPu/Yourself-Copilot/releases/latest) 下载 `Yourself-Copilot-windows-x64.zip`，完整解压到有写入权限的文件夹，再运行 `Yourself Copilot.exe`。不要只从压缩包内打开 EXE，也不要把 EXE 单独移走；两个 XAML 文件、`fonts/` 和 `icons/` 都是运行资源。
+从 [Releases](https://github.com/IsaacPu/Yourself-Copilot/releases/latest) 下载 `Yourself-Copilot-Setup-0.2.0-x64.exe`，双击后按中文向导安装。默认安装到当前用户的 `%LOCALAPPDATA%\Programs\Yourself Copilot`，无需管理员权限，可选择其他有写入权限的位置。
 
-v0.2.0还依赖同目录的 `illustrations/` 和 `sounds/`，用于空纸篓、有纸团的纸篓、纸页卷角与投放方向提示；应与程序及其余资源完整保留。构建和打包脚本均包含这些资源，不能只复制EXE。
+开始菜单入口自动创建，桌面快捷方式可选；安装完成后可直接打开程序。安装器会放好所有字体、图标、界面、插画和声音资源，使用中无需手工解压或复制。请勿单独移动安装后的程序EXE。
+
+已有ZIP版：先从托盘退出并备份旧文件夹。在向导中选择“升级免安装版”，选包含 `Yourself Copilot.exe` 的旧文件夹，确认安装位置仍是原目录。安装只更新程序与资源，原有内容不搬动、不覆盖。选择全新位置会从空内容开始，旧目录内容仍保留。
 
 首次打开是空的任务和图片库。添加任务时可选择今天、明天或其他日期；此前未完成的任务会在今天单列，原计划日期不变。完成的任务默认收起，展开后可恢复。
 
@@ -64,15 +66,17 @@ v0.2.0还依赖同目录的 `illustrations/` 和 `sounds/`，用于空纸篓、�
 ## 更新版本
 
 1. 从托盘退出程序，备份整个旧文件夹。
-2. 将新 ZIP 解压到临时位置，再将其中的程序与资源复制到旧程序目录，按需覆盖同名程序文件。
-3. 保留旧目录中的 `workboard.json*`、`library.json*`、`settings.json*`、`images/`、`history/` 和 recovery 文件，再启动程序。
+2. 下载并运行新的安装包。已有安装版会沿用原安装位置；ZIP版首次升级时选择“升级免安装版”和旧程序文件夹。
+3. 确认位置后安装，完成后重新打开。已有 `workboard.json*`、`library.json*`、`settings.json*`、`images/`、`history/` 和 recovery 文件均保留。
 
-官方 ZIP 不包含个人数据文件，不会用空白任务覆盖你的数据。若改在新文件夹运行，原目录数据不会自动迁入；请先退出，复制上述数据，再从新目录启动。更换路径后重新设置登录自动运行。
+安装包不包含个人数据，不会用空白任务覆盖旧内容。安装器会拦截旧版本覆盖新版本，程序未退出时也不会强制关闭。若改在新文件夹运行，原目录数据不会自动迁入；请先退出、备份并复制上述数据，再从新目录启动。更换路径后重新设置登录自动运行。
+
+卸载可前往 Windows“已安装的应用”，找到 Yourself Copilot。卸载会移除程序、随附资源和快捷方式，仅清理指向本安装位置的登录启动项；任务、随手记、图片、历史与恢复数据保留在原文件夹。重新安装到同一位置即可继续使用。
 
 ## 环境与反馈
 
 需要 Windows 10 / 11 x64、.NET Framework 4.8 或以上及标准 Explorer 桌面。本版在Windows、.NET Framework 4.8.1环境进行构建、隔离存储、原生控件和解压包检查；未穷尽所有多屏DPI、输入法或Windows配置。
 
-当前版本未进行数字签名。Release 附有 `SHA256SUMS.txt`，可用 `Get-FileHash .\Yourself-Copilot-windows-x64.zip -Algorithm SHA256` 核对下载完整性。
+当前应用及安装包尚未进行数字签名，Windows可能显示未识别发布者提示。安装包SHA256记录在Release更新说明中，可用 `Get-FileHash .\Yourself-Copilot-Setup-0.2.0-x64.exe -Algorithm SHA256` 核对下载完整性。
 
 遇到问题可在 [Issues](https://github.com/IsaacPu/Yourself-Copilot/issues) 提供版本号、Windows 版本和复现步骤。请先检查截图和日志中的个人内容。

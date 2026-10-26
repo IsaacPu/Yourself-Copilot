@@ -1,6 +1,6 @@
 # 开发与发布
 
-日常使用请下载 [Release 免安装包](https://github.com/IsaacPu/Yourself-Copilot/releases/latest)。本文面向修改源码和构建程序的开发者。
+日常使用请下载 [Release EXE安装包](https://github.com/IsaacPu/Yourself-Copilot/releases/latest)。本文面向修改源码和构建程序的开发者。
 
 ## 目录
 
@@ -50,8 +50,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\verify-package.ps1
 
 打包脚本重新构建，并用白名单将程序、运行资源和用户说明装入 `dist/Yourself-Copilot-windows-x64.zip`，同时生成 `dist/SHA256SUMS.txt`。不会递归打包整个项目或已经运行过的程序目录。包检查会独立解压并核对文件、版本、校验值与空数据首启。
 
-发布前应从新 ZIP 解压到独立位置，核对文件、版本和校验值，并验收空数据首启。Release 标签使用 `v` 加 `VERSION`，将 ZIP 与校验文件作为附件；源码由 GitHub 独立提供。
+ZIP作为可验证的中间载荷保留在本地。发布前核对文件、版本和校验值，并验收空数据首启，再使用[安装器构建说明](INSTALLER.md)生成EXE。Release标签使用 `v` 加 `VERSION`，面向用户只上传安装EXE，SHA256放入更新说明。
 
-程序当前未签名，没有安装器、自动更新器、AI 接入或云端同步。不要把 ZIP 描述为无 .NET 运行时依赖的独立单文件程序。
+安装器采用Inno Setup 7.1，中文向导、当前用户安装，包含运行环境检查和保留个人内容的升级/卸载。程序及安装器当前未签名，没有自动更新器、AI接入或云端同步，仍依赖.NET Framework 4.8或以上。
 
 发布呈现参考：[Flow Launcher](https://github.com/Flow-Launcher/Flow.Launcher)、[CopyQ](https://github.com/hluk/CopyQ)、[Lively](https://github.com/lively-community/lively) 的下载入口、源码目录与 Release 附件组织。

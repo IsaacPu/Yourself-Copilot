@@ -11,11 +11,11 @@
   <a href="https://github.com/IsaacPu/Yourself-Copilot/releases/tag/v0.2.0">v0.2.0</a>
   · Windows 10 / 11 x64
   · 本地保存
-  · 免安装
+  · 中文安装向导
 </p>
 
 <p align="center">
-  <a href="https://github.com/IsaacPu/Yourself-Copilot/releases/latest/download/Yourself-Copilot-windows-x64.zip"><strong>下载 Windows 版</strong></a>
+  <a href="https://github.com/IsaacPu/Yourself-Copilot/releases/latest/download/Yourself-Copilot-Setup-0.2.0-x64.exe"><strong>下载 Windows 安装包</strong></a>
   &nbsp; · &nbsp; <a href="docs/USAGE.md">使用指南</a>
   &nbsp; · &nbsp; <a href="CHANGELOG.md">更新日志</a>
 </p>
@@ -53,13 +53,13 @@
 
 ## 下载与开始
 
-1. [下载 Windows 免安装包](https://github.com/IsaacPu/Yourself-Copilot/releases/latest/download/Yourself-Copilot-windows-x64.zip)，**完整解压**到有写入权限的文件夹。
-2. 双击 `Yourself Copilot.exe`，添加第一个任务，或在随手记里写下想法。
+1. [下载 Windows 安装包](https://github.com/IsaacPu/Yourself-Copilot/releases/latest/download/Yourself-Copilot-Setup-0.2.0-x64.exe)，双击后按中文向导安装。
+2. 从开始菜单或桌面快捷方式打开，添加第一个任务，或在随手记里写下想法。
 3. 按需在设置中开启登录自动运行，让桌面卡片随 Windows 登录显示。
 
 需要 **Windows 10 / 11（64 位）及 .NET Framework 4.8 或更高版本**。无需编译、注册账号或配置 API Key。
 
-请保留解压后的所有文件和资源文件夹。日常使用下载文件名为 `Yourself-Copilot-windows-x64.zip` 的应用包；GitHub 的 “Code → Download ZIP” 和 Release 中的 “Source code” 提供源码。
+默认只安装到当前 Windows 用户，无需管理员权限。使用旧 ZIP 版时，在安装向导中选择“升级免安装版”，再选原程序文件夹，即可保留内容继续使用。
 
 关闭工作台后，程序会继续驻留托盘。双击托盘图标重新打开，完整退出请选择托盘菜单中的“退出 Yourself Copilot”。
 
@@ -67,7 +67,7 @@
 
 任务、随手记、图片和历史保存在**程序所在文件夹**，目前没有云端同步，本地文件未加密。迁移或备份时，先退出程序，再复制整个文件夹。
 
-更新时先备份旧目录，再用新版本的程序和资源覆盖同名文件，**保留个人数据文件、`images/` 和 `history/`**。如果换到新文件夹运行，需手动迁入原有数据。具体文件清单和步骤见 [数据与备份](docs/USAGE.md#数据与备份) 与 [更新版本](docs/USAGE.md#更新版本)。
+更新时先退出并备份旧目录，再运行新安装包，沿用原位置。安装只更新程序与资源，个人内容会保留。可从 Windows“已安装的应用”卸载，卸载后个人内容仍留在原文件夹；重新安装到同一位置即可继续使用。具体步骤见 [更新版本](docs/USAGE.md#更新版本)。
 
 ## 开发与反馈
 
